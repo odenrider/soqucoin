@@ -48,8 +48,16 @@ bool IsAttestedVersion(int version, const AttestedSetParams& params)
 {
     switch (version) {
     case 0: case 1: return true;                  // base forms, active from genesis
-    case 7: return params.fUsdsoqActive;          // USDSOQ holding, joins at activation
-    case 8: return params.fBtcsoqActive;          // BTCSOQ holding, joins at activation
+    // v7/v8 are attested UNCONDITIONALLY (additive-asset genesis door,
+    // 2026-09). They used to join at their deployment's activation height,
+    // which made the block commitment a function of activation state: a
+    // genesis node and an upgraded node would recompute different
+    // attestations over the same block from the activation height onward and
+    // reject each other's commitments — a hard fork by construction. A set
+    // that never changes cannot do that. Dormant v7/v8 spends are anyone-
+    // can-spend two-item spends; attesting their (unverified) tuples commits
+    // to bytes, not to validity, exactly as for every other tuple.
+    case 7: case 8: return true;                  // USDSOQ / BTCSOQ holding, fixed
     default: return false;                        // spec §2 disposition table
     }
 }

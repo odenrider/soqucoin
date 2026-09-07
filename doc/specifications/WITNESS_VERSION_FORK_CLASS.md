@@ -9,8 +9,9 @@ may therefore **add** a rejection, and may never accept anything the genesis bin
 Two corollaries decide everything below:
 
 1. A consensus rule in the genesis binary that **rejects** a shape is a promise every later
-   release must keep. A rule that **exempts, skips or widens** on a shape is one every later
-   release must keep exempting.
+   release must keep. An **exemption, skip or widening** that is dormant in the genesis binary
+   and switches ON at activation is a loosening, i.e. a hard fork; an exemption the genesis
+   binary applies may be dropped later, since dropping it only tightens.
 2. So the genesis binary carries **no consensus behaviour keyed on a dormant feature's shape**
    unless that behaviour is one every later release will keep verbatim.
 
@@ -28,13 +29,18 @@ switches from reject to accept at activation is a hard fork however it is gated.
 | Undo mirrors for asset supply, authority outpoint, freeze registry and key images | `DisconnectBlock` | state corruption, not fork class: reversed ops ConnectBlock never applied | gated on the deployment exactly as ConnectBlock is |
 | Asset/attestation opcodes inside a v6 script: `BAD_OPCODE` while the asset flag is clear, executed once set | `interpreter.cpp` v6 path | rejection relaxed at asset activation → hard fork for every asset activation after P2WSH-Dilithium | made unconditionally invalid inside v6 (opcodes are dispatched by witness version, never by script) |
 | Coinbase asset bans (`bad-cb-usdsoq-asset`, `bad-cb-btcsoq-asset`) and dual-marker ban | `CheckTransaction` | rejections every release keeps | **kept**, coinbase USDSOQ ban extended to v10 |
+| `HasDilithiumSignatures` (`bad-txns-requires-dilithium`): the LAST witness item of every non-coinbase input must begin `0x00`, with a whole-tx exemption when an `OP_5` output plus an authority-shaped witness is present | `CheckTransaction` via `primitives/transaction.cpp` | the check is a rejection every release keeps; the exemption is applied by the genesis binary (dropping it later only tightens) | **kept**; constrains every future witness layout (§4.8) |
+| PAT attested set: v7/v8 two-item spends joined the set only when their deployment was active | `consensus/pat_attestation.cpp`, `ConnectBlock` commitment check | commitment became a function of activation state → genesis and upgraded nodes reject each other's commitments = **hard fork** | set fixed at v0/v1/v7/v8 for every height |
+| Mempool marker-spend mirrors (`bad-*-marker-spend`) | `AcceptToMemoryPoolWorker` | policy, not fork class, but DoS(100) on a consensus-valid spend of a dormant marker | gated on the deployment like their ConnectBlock twins |
 | Per-asset `nValue` conservation and per-asset fee filter | `CheckTxInputs`, ConnectBlock | rejections/accounting every release keeps | kept; satisfied trivially forever under §4 |
 | Ex-nihilo mint exemption from conservation; authority script skip | `CheckTxInputs`, `CheckInputs` | gated on deployment active and authority initialised; never fire on mainnet in the genesis binary | kept dormant; **the activation release must delete both** (§4) |
 
 Net posture of the genesis binary on mainnet: witness v3–v16 are creatable, anyone-can-spend at
-consensus, worth their `nValue` in SOQ, non-standard until their deployment activates, with no
-asset accounting of any kind. v2 (PAT) is permanently unconstructable because its spend path
-binds neither the witness program nor the sighash.
+consensus and non-standard until their deployment activates. Every `nValue` is plaintext SOQ.
+The asset holding shapes v7/v8/v10 can only be created with `nValue == 0` (the unconditional
+per-asset conservation rule and the coinbase bans); every other shape carries whatever SOQ it is
+paid. v2 (PAT) is permanently unconstructable because its spend path binds neither the witness
+program nor the sighash.
 
 ## 3. Per-version fork class after the change
 
@@ -81,9 +87,18 @@ The genesis binary makes activation *possible* as a soft fork. The activation re
    of spends of listed outpoints. Coinbase and dual-marker bans are rejections. Nothing keyed on
    a shape may exempt, skip, widen, or change how SOQ value is counted.
 6. **SoquObscura uses the shielded-pool model.** Shielding pays visible SOQ into pool outputs,
-   unshielding spends them back to visible SOQ, and only transfers inside the pool hide amounts
-   and links. SOQ conservation holds publicly at every pool boundary. Per-output hidden amounts
-   on the base layer cannot be a soft fork on any UTXO chain.
+   unshielding spends them back to visible SOQ, and only the notes inside the pool (commitments
+   that are not UTXOs) hide amounts and links. Every UTXO's `nValue`, including every pool
+   output's, stays plaintext, so no conservation rule changes. SOQ conservation holds publicly
+   at every pool boundary. Per-output hidden amounts in `nValue` on the base layer cannot be a
+   soft fork on any UTXO chain.
+8. **Witness layout constraint from `HasDilithiumSignatures`.** The genesis binary rejects any
+   non-coinbase transaction whose input witness does not END with a `0x00`-prefixed item, unless
+   the `OP_5`-marker exemption applies (which the activation release deletes with the script
+   skip). Every future layout must satisfy it: the authority M-of-N witness on a v5/v9 marker
+   input must end with a `0x00`-prefixed item (for example a `0x00`-prefixed authority set), and
+   a pool-spend witness for SoquObscura must end with a `0x00`-prefixed item rather than a bare
+   commitment.
 7. **UTXO_COST**, when scheduled, exempts zero-value asset outputs as it already exempts the
    authority markers. It is dormant in the genesis binary, so any version of it is a tightening.
 

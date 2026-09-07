@@ -18,8 +18,8 @@ able to produce identical bytes from this document alone.
 One PAT proof per block, computed over the Dilithium signatures carried by that
 block's attested spends (§2). The proof is committed in the coinbase and
 validated in `ConnectBlock`. The attestation is block metadata. It is not an
-output type: witness v2 is permanently unfundable (`validation.cpp`
-`versionActive` case 2), so no value can be paid into the attestation machinery.
+output type: witness v2 is permanently unfundable (the v2 creation rule in
+`ConnectBlock`), so no value can be paid into the attestation machinery.
 
 The attestation enables witness pruning: nodes may discard attested raw witness
 data past the finality horizon while retaining the attestation (phase 5 of the
@@ -50,22 +50,27 @@ specification today and diverge from it at a future activation height.
 | v4 (confidential SOQ) | No. Witness carries `[range_proof, pubkey_hash, commitment]`; there is no per-input Dilithium signature over a sighash | No | Wrong payload shape; also unfundable while `SOQUOBSCURA` is dormant, and fails closed if activated (no verifier ships) |
 | v5 (USDSOQ authority marker) | Not per-input. Authority transactions carry M-of-N ML-DSA signatures verified whole-transaction in `ConnectBlock`; they skip `VerifyScript` entirely | No — see the authority-signature note below | Not a per-input tuple; a different verification model |
 | v6 (P2WSH-Dilithium) | Sometimes. A witnessScript may perform zero, one, or many signature checks (`OP_CHECKSIGFROMSTACK`, `OP_CHECKDILITHIUMSIG` variants) at positions the block structure does not expose | No — see the v6 note below | No 1:1 spend-to-tuple mapping exists without re-executing scripts |
-| v7 (USDSOQ holding) | Yes, once `USDSOQ` activates. Falls through to the same single-key path as v1; witness is exactly `[sig, pubkey]` | **Yes, from the `USDSOQ` activation height** (Decision 1) | Identical verification to v1; dormant at genesis |
-| v8 (BTCSOQ holding) | Yes, once `BTCSOQ` activates. Same fall-through | **Yes, from the `BTCSOQ` activation height** (Decision 1) | Identical verification to v1; dormant at genesis |
+| v7 (USDSOQ holding) | Yes, once `USDSOQ` activates. Falls through to the same single-key path as v1; witness is exactly `[sig, pubkey]` | **Yes, always** (Decision 1 as amended 2026-09-07) | Identical verification to v1; a dormant two-item spend is attested as bytes |
+| v8 (BTCSOQ holding) | Yes, once `BTCSOQ` activates. Same fall-through | **Yes, always** (Decision 1 as amended 2026-09-07) | Same basis as v7 |
 | v9 (BTCSOQ authority marker) | Not per-input. Same whole-transaction M-of-N model as v5 | No — see the authority-signature note below | Same basis as v5 |
 | v10 (confidential USDSOQ) | No. Same payload shape as v4; compound gate; fails closed if activated | No | Same basis as v4 |
-| v11–v16 | No spend can exist. Unallocated; unfundable under the reservation rule | No | Same basis as v2/v3 |
+| v11–v16 | Unallocated; creatable and anyone-can-spend while unallocated (additive-asset genesis door) | No | No defined tuple |
 
 ### The rule, as ruled (Decision 1, 2026-09-01)
 
 A spend is attested if and only if it is a witness spend whose witness stack is
-exactly two items and whose verification is the single-key Dilithium path. At
-genesis that set is v0 and v1. The set extends to v7 at the `USDSOQ` activation
-height and to v8 at the `BTCSOQ` activation height, from those heights forward.
-Consequently each of those activations is also an attestation change: the
-activation review must confirm full fleet coverage before the height, per
-`doc/DEPLOYMENT_PRECONDITIONS.md` rule 2, and must re-verify the attested-set
-tests with the deployment active and withdrawn.
+exactly two items and whose verification is the single-key Dilithium path:
+v0, v1, v7 and v8, **at every height and independent of deployment state**.
+
+Amended 2026-09-07 (additive-asset genesis door). Decision 1 originally had v7
+join at the `USDSOQ` activation height and v8 at the `BTCSOQ` height. That made
+the block commitment a function of activation state: from the activation height
+on, a genesis-binary node and an upgraded node recompute different attestations
+over the same block and reject each other's commitments in both directions — a
+hard fork by construction, which the additive-asset design forbids. A fixed set
+cannot do that. A dormant v7/v8 spend is an anyone-can-spend two-item spend; its
+tuple is attested as bytes, exactly like every other tuple, and commits to
+nothing about validity.
 
 ### The authority-signature note (v5, v9)
 
@@ -297,13 +302,11 @@ The complete risk surface, collected for review as a single list:
 
 1. **Tie-breaking in the canonical ordering.** Closed by PR #65 and pinned by
    known-answer vectors. This was a measured defect, not a hypothetical.
-2. **The attested set changing under deployment activation** (§2). Ruled
-   (Decision 1): the set extends to v7 and v8 at their activation heights, so
-   the hazard is managed rather than removed. Each such activation is an
-   attestation change, and the activation review must re-verify the
-   attested-set tests with the deployment active and withdrawn. This
-   requirement is carried as a precondition on the `DEPLOYMENT_USDSOQ` and
-   `DEPLOYMENT_BTCSOQ` rows of `doc/DEPLOYMENT_PRECONDITIONS.md`.
+2. **The attested set changing under deployment activation** (§2). Removed
+   (Decision 1 as amended 2026-09-07): the set is fixed at v0/v1/v7/v8 for
+   every height, so no activation changes the commitment and there is no
+   attestation-change review item. The earlier "managed" posture was itself
+   the hard-fork class the additive-asset genesis door exists to remove.
 3. **Public-key encoding duality** (§3). Ruled (Decision 2): `pk` commits to
    the canonical stripped form, so both accepted encodings of a key attest
    identically. Coupled to bead `flpa`: if the duality is later closed by
@@ -347,9 +350,11 @@ coverage.
 
 ## 10. Decisions — RULED 2026-09-01
 
-1. **The attested set (§2): the set extends.** Attestation covers every
-   two-item single-key Dilithium spend, so v7 joins at the `USDSOQ` activation
-   height and v8 at the `BTCSOQ` activation height. Basis for the ruling: the
+1. **The attested set (§2): the set is fixed.** Attestation covers every
+   two-item single-key Dilithium spend of v0/v1/v7/v8 at every height
+   (amended 2026-09-07: v7/v8 originally joined at their activation heights,
+   which made the commitment activation-dependent, i.e. a hard fork). Basis
+   for the original ruling, still the basis for including v7/v8 at all: the
    extension honours the "every single-key Dilithium signature is committed"
    contract and keeps v7/v8 witnesses prunable, and the added process cost is
    one review item on an activation checklist that `DEPLOYMENT_PRECONDITIONS.md`

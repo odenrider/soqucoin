@@ -1218,6 +1218,16 @@ bool AcceptToMemoryPoolWorker(CTxMemPool& pool, CValidationState& state, const C
                     break;
                 }
             }
+            // The marker-chain guard mirrors a ConnectBlock rule that sits inside
+            // `flags & SCRIPT_VERIFY_BTCSOQ`, so it is gated the same way. While
+            // the deployment is dormant a v9 marker is plain anyone-can-spend SOQ
+            // (additive-asset genesis door); rejecting its spend here with
+            // DoS(100) would ban the relayer of a transaction consensus accepts.
+            // The conservation mirror stays ungated, like the CheckTxInputs rule.
+            const int nBTCSOQMirrorHeight = chainActive.Height() + 1;
+            const bool fBTCSOQMirrorActive = Consensus::DeploymentActiveAtHeight(
+                nBTCSOQMirrorHeight, Params().GetConsensus(nBTCSOQMirrorHeight),
+                Consensus::DEPLOYMENT_BTCSOQ);
             if (!isBTCSOQAuthTx) {
                 CAmount nBTCSOQIn = 0, nBTCSOQOut = 0;
                 for (const auto& txin : tx.vin) {
@@ -1225,8 +1235,9 @@ bool AcceptToMemoryPoolWorker(CTxMemPool& pool, CValidationState& state, const C
                     if (!c || !c->IsAvailable(txin.prevout.n)) continue;
                     // Marker-chain guard (mempool mirror of the ConnectBlock
                     // bad-btcsoq-marker-spend rule): only an authority tx may
-                    // spend a v9 marker UTXO.
-                    if (IsBTCSOQAuthorityMarker(c->vout[txin.prevout.n].scriptPubKey)) {
+                    // spend a v9 marker UTXO — once the deployment is active.
+                    if (fBTCSOQMirrorActive &&
+                        IsBTCSOQAuthorityMarker(c->vout[txin.prevout.n].scriptPubKey)) {
                         return state.DoS(100, false, REJECT_INVALID,
                             "bad-btcsoq-marker-spend", false,
                             strprintf("non-authority tx spends BTCSOQ authority marker %s:%u",
@@ -1271,7 +1282,15 @@ bool AcceptToMemoryPoolWorker(CTxMemPool& pool, CValidationState& state, const C
                 if (o.scriptPubKey.size() == 34 && o.scriptPubKey[0] == OP_5 &&
                     o.scriptPubKey[1] == 32) { hasUsdsoqMarkerOut = true; break; }
             }
-            if (!hasUsdsoqMarkerOut) {
+            // Gated on the deployment exactly like its ConnectBlock twin (inside
+            // `flags & SCRIPT_VERIFY_USDSOQ`): while USDSOQ is dormant a v5 marker
+            // is plain anyone-can-spend SOQ and its spend must not earn the
+            // relayer a DoS(100) for a consensus-valid transaction.
+            const int nUSDSOQMirrorHeight = chainActive.Height() + 1;
+            const bool fUSDSOQMirrorActive = Consensus::DeploymentActiveAtHeight(
+                nUSDSOQMirrorHeight, Params().GetConsensus(nUSDSOQMirrorHeight),
+                Consensus::DEPLOYMENT_USDSOQ);
+            if (fUSDSOQMirrorActive && !hasUsdsoqMarkerOut) {
                 for (const auto& txin : tx.vin) {
                     const CCoins* c = view.AccessCoins(txin.prevout.hash);
                     if (!c || !c->IsAvailable(txin.prevout.n)) continue;
@@ -2140,10 +2159,12 @@ bool CheckTxInputs(const CChainParams& params, const CTransaction& tx, CValidati
         // was simply never extended when v10 was allocated.
         //
         // Like the v7 and v8 rules, this is STRUCTURAL and deliberately NOT
-        // deployment-gated, so the v10 witness shape is RESERVED from genesis: no
-        // v10 input can exist, therefore any tx creating a v10 output fails
-        // out > in = 0. Shipping it dormant now is what keeps a later SoquObscura
-        // activation a soft fork rather than a rule that has to be added afterwards.
+        // deployment-gated. The v10 SHAPE is creatable (additive-asset genesis
+        // door) but its VALUE is reserved from genesis: no v10 input can exist,
+        // so any tx creating a v10 output with nValue > 0 fails out > in = 0, and
+        // only zero-value v10 outputs can exist before activation. The activation
+        // release mandates nValue == 0 on asset outputs, so this rule stays
+        // satisfied trivially and never has to be relaxed.
         //
         // ⚠️ REVISIT WHEN VALUE MOVES INTO THE COMMITMENT (bead sh2u). This sums
         // nValue, which is still a plaintext CAmount on a confidential output. The
@@ -2220,8 +2241,8 @@ bool CheckTxInputs(const CChainParams& params, const CTransaction& tx, CValidati
     // so policy and consensus can never diverge (Option B pattern).
     // DEPLOYMENT POSTURE: like the USDSOQ rule above, this is structural and
     // NOT deployment-gated. On mainnet (BTCSOQ NOT_SCHEDULED) no v8 UTXOs
-    // exist, so v8 inputs are impossible and any tx CREATING v8 outputs fails
-    // this rule (out > in = 0) — i.e. the v8 witness shape is RESERVED from
+    // carrying value exist, so any tx CREATING a v8 output with nValue > 0
+    // fails this rule (out > in = 0) — i.e. the v8 VALUE is RESERVED from
     // genesis, exactly the USDSOQ v7 posture. Fleet upgrades are coordinated
     // flag-day releases, so there is no mixed-version mining window.
     if (!isBTCSOQAuthorityTx) {
@@ -3592,9 +3613,10 @@ bool ConnectBlock(const CBlock& block, CValidationState& state, CBlockIndex* pin
     // PAT block attestation (doc/PAT_BLOCK_ATTESTATION.md): tuples are
     // collected inside the loop below, per transaction, because the view
     // resolves each transaction's prevouts only until UpdateCoins spends them.
-    // The attested set derives from the same flags that gate v7/v8 fundability,
-    // so the set and fundability cannot disagree. Enforcement happens after the
-    // loop, once the batch is complete.
+    // The attested set is fixed (v0/v1/v7/v8 two-item spends, independent of
+    // any deployment flag) so that a later asset activation cannot change the
+    // commitment the genesis binary recomputes; see IsAttestedVersion.
+    // Enforcement happens after the loop, once the batch is complete.
     //
     // Gated on fScriptChecks, the assumevalid/checkpoint window where signature
     // verification itself is skipped. The attestation attests those same
@@ -3610,9 +3632,7 @@ bool ConnectBlock(const CBlock& block, CValidationState& state, CBlockIndex* pin
     // and reject valid historical blocks (bad-blk-pat-commitment-empty) during
     // fast sync.
     patattest::PatBatch patBatch;
-    patattest::AttestedSetParams patParams;
-    patParams.fUsdsoqActive = (flags & SCRIPT_VERIFY_USDSOQ) != 0;
-    patParams.fBtcsoqActive = (flags & SCRIPT_VERIFY_BTCSOQ) != 0;
+    const patattest::AttestedSetParams patParams;   // fixed set; carries no per-height facts
 
     for (unsigned int i = 0; i < block.vtx.size(); i++) {
         const CTransaction& tx = *(block.vtx[i]);
@@ -3664,7 +3684,7 @@ bool ConnectBlock(const CBlock& block, CValidationState& state, CBlockIndex* pin
                         nSOQIn += prevOut.nValue;
                     } else {
                         // DIAG-FEE: Log every non-SOQ input filtered from fee
-                        LogPrintf("DIAG-FEE: FILTERED INPUT tx=%s vin[%u] prevout=%s:%u "
+                        LogPrint("diagfee", "DIAG-FEE: FILTERED INPUT tx=%s vin[%u] prevout=%s:%u "
                             "isUSDSOQ=%d isConfidential=%d value=%lld coinHeight=%d isCoinBase=%d\n",
                             tx.GetHash().ToString(), j,
                             tx.vin[j].prevout.hash.ToString(), tx.vin[j].prevout.n,
@@ -3685,7 +3705,7 @@ bool ConnectBlock(const CBlock& block, CValidationState& state, CBlockIndex* pin
             // DIAG-FEE: Summary if filtered fee differs from unfiltered
             if (nSOQIn != nTotalIn) {
                 CAmount nTotalOut = tx.GetValueOut();
-                LogPrintf("DIAG-FEE: MISMATCH tx=%s inputs=%zu totalIn=%lld soqIn=%lld "
+                LogPrint("diagfee", "DIAG-FEE: MISMATCH tx=%s inputs=%zu totalIn=%lld soqIn=%lld "
                     "excluded=%lld totalOut=%lld soqOut=%lld unfilteredFee=%lld filteredFee=%lld\n",
                     tx.GetHash().ToString(), tx.vin.size(),
                     nTotalIn, nSOQIn, nTotalIn - nSOQIn,
@@ -5177,7 +5197,7 @@ bool ConnectBlock(const CBlock& block, CValidationState& state, CBlockIndex* pin
     // Placement: After USDSOQ enforcement, before key-image tracking.
     // Pattern: Same as LATTICEBP confidential output rejection (L2329-2342).
     //
-    // Approved: Casey Wilson, May 25 2026. BIP9 bit 11.
+    // Approved 2026-05-25. BIP9 bit 11.
     // See DL-SOQ-FEE-ARCHITECTURE-V3.md, Appendix A.
     // =========================================================================
     if (fEnforceUtxoCost) {
@@ -7158,14 +7178,9 @@ std::vector<unsigned char> GenerateCoinbaseCommitment(CBlock& block, const CBloc
         const int nHeight = pindexPrev == nullptr ? 0 : pindexPrev->nHeight + 1;
         const Consensus::Params& patConsensus = Params().GetConsensus(nHeight);
 
-        // The attested set at this height (spec §2, Decision 1): the same
-        // DeploymentActiveAtHeight facts ConnectBlock turns into
-        // SCRIPT_VERIFY_USDSOQ / SCRIPT_VERIFY_BTCSOQ.
-        patattest::AttestedSetParams patParams;
-        patParams.fUsdsoqActive = Consensus::DeploymentActiveAtHeight(
-            nHeight, patConsensus, Consensus::DEPLOYMENT_USDSOQ);
-        patParams.fBtcsoqActive = Consensus::DeploymentActiveAtHeight(
-            nHeight, patConsensus, Consensus::DEPLOYMENT_BTCSOQ);
+        // The attested set is fixed and height-independent (see
+        // IsAttestedVersion), so the miner and ConnectBlock cannot disagree.
+        const patattest::AttestedSetParams patParams;
 
         // Prevouts: outputs created earlier in this block first (in-block
         // chained spends), then the chain view. Same resolution order the

@@ -42,6 +42,7 @@
 #include "consensus/merkle.h"
 #include "consensus/params.h"
 #include "consensus/usdsoq.h"
+#include "consensus/privacy.h"
 #include "policy/policy.h"
 #include "test/dilithium_chain_setup.h"
 #include "test/testutil.h"   // ScopedRegtestActivation
@@ -400,9 +401,12 @@ BOOST_AUTO_TEST_CASE(dormant_authority_shape_spending_a_marker_input_connects)
         in.scriptWitness.stack.push_back(std::vector<unsigned char>(2420, 0x03));
         // CheckTransaction requires the LAST witness item of every input to be
         // 0x00-prefixed (bad-txns-requires-dilithium) unless the tx carries the
-        // OP_5 marker exemption. That rule is one the genesis binary keeps, so
-        // the activation release's authority_set item must be 0x00-prefixed —
-        // recorded as an activation-release obligation.
+        // OP_5 marker exemption. The USDSOQ row is exempt (OP_5 output plus an
+        // authority-shaped witness); the BTCSOQ row is NOT, so its last item
+        // must be 0x00-prefixed or the genesis binary rejects the shape. That
+        // rule is one the genesis binary keeps forever, so the activation
+        // release's authority_set item must be 0x00-prefixed
+        // (WITNESS_VERSION_FORK_CLASS.md §4.8).
         std::vector<unsigned char> authoritySet(64, 0x04);
         authoritySet[0] = 0x00;
         in.scriptWitness.stack.push_back(authoritySet);
@@ -488,6 +492,73 @@ BOOST_AUTO_TEST_CASE(reorg_over_dormant_asset_shapes_does_not_touch_asset_state)
 
     LOCK(cs_main);
     g_btcsoq_authority_outpoint = COutPoint();   // do not leak into the next suite
+}
+
+// The USDSOQ twin. Regtest's USDSOQ freeze-reversal path is height-gated
+// (nUSDSOQAuthorityEnforcementHeight = 7700) and the supply path needs a v7
+// output with value, which conservation forbids; the authority-outpoint
+// reversal has neither guard. Before the undo gate, disconnecting a block with
+// a v5-marker-shaped tx that spends no marker input reverted the tracked
+// outpoint to null ("bootstrap disconnected") while USDSOQ was dormant.
+BOOST_AUTO_TEST_CASE(reorg_over_dormant_usdsoq_marker_does_not_touch_authority_outpoint)
+{
+    ScopedRegtestWithdrawal off(Consensus::DEPLOYMENT_USDSOQ, 0);
+    const COutPoint sentinel(uint256S("0x0000000000000000000000000000000000000000000000000000000000c0ffee"), 5);
+
+    CMutableTransaction tx = SpendTo(coinbaseTxns[36], Spk(OP_5));
+    {
+        LOCK(cs_main);
+        g_usdsoq_authority_outpoint = sentinel;
+    }
+    Connect(tx);
+    const int tipHeight = chainActive.Height();
+    {
+        LOCK(cs_main);
+        CValidationState st;
+        BOOST_REQUIRE(InvalidateBlock(st, Params(), chainActive.Tip()));
+    }
+    BOOST_REQUIRE_EQUAL(chainActive.Height(), tipHeight - 1);
+    BOOST_CHECK_MESSAGE(g_usdsoq_authority_outpoint == sentinel,
+        "disconnecting a block that carried a dormant v5 marker overwrote the tracked USDSOQ "
+        "authority outpoint: the undo path restored state ConnectBlock never advanced");
+
+    LOCK(cs_main);
+    g_usdsoq_authority_outpoint = COutPoint();
+}
+
+// The SoquObscura twin. ConnectBlock writes key images only while the
+// deployment is active; the undo path erases the key image derived from the
+// last witness item of every spend of a confidential-shaped input. Before the
+// gate, disconnecting a block that spent a dormant v4 output with a garbage
+// witness erased whatever key image that garbage happened to hash to. Seed
+// that hash first so the erasure is observable.
+BOOST_AUTO_TEST_CASE(reorg_over_dormant_confidential_spend_does_not_touch_key_images)
+{
+    const int h = chainActive.Height() + 1;
+    BOOST_REQUIRE(!Consensus::DeploymentActiveAtHeight(h, Params().GetConsensus(h),
+                                                       Consensus::DEPLOYMENT_SOQUOBSCURA));
+
+    CMutableTransaction fund = SpendTo(coinbaseTxns[37], Spk(OP_4));
+    Connect(fund);
+    CMutableTransaction sweep = GarbageSweep(CTransaction(fund));
+    const LatticeKeyImageHash kiHash =
+        LatticeKeyImageHash::FromSerializedKeyImage(sweep.vin[0].scriptWitness.stack.back());
+    BOOST_REQUIRE(pcoinsdbview->WriteKeyImage(kiHash.hash, 1));
+    BOOST_REQUIRE(pcoinsdbview->HaveKeyImage(kiHash.hash));
+
+    Connect(sweep);
+    const int tipHeight = chainActive.Height();
+    {
+        LOCK(cs_main);
+        CValidationState st;
+        BOOST_REQUIRE(InvalidateBlock(st, Params(), chainActive.Tip()));
+    }
+    BOOST_REQUIRE_EQUAL(chainActive.Height(), tipHeight - 1);
+    BOOST_CHECK_MESSAGE(pcoinsdbview->HaveKeyImage(kiHash.hash),
+        "disconnecting a block that spent a dormant v4 output erased a key image: the undo "
+        "path reversed a write ConnectBlock never made");
+
+    pcoinsdbview->EraseKeyImage(kiHash.hash);   // do not leak into the next suite
 }
 
 BOOST_AUTO_TEST_SUITE_END()

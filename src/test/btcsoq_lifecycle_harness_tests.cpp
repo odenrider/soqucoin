@@ -558,11 +558,11 @@ BOOST_AUTO_TEST_CASE(connectblock_rejects_exotic_input_in_btcsoq_transfer)
 // where supply is auditable, and a hidden amount there breaks the invariant
 // outright (GENIUS Act 4(a)(2)).
 //
-// SoquObscura has to be ACTIVE for this to be the rule that fires. While it is
-// dormant, SOQ-ARCH-001 rejects every confidential output block-wide, earlier in
-// the same ConnectBlock, and would shadow this. That ordering is itself worth
-// pinning: the assertion below is what tells us which of the two is doing the
-// work at any given time.
+// SoquObscura is activated here so the confidential output is a real
+// confidential output rather than a dormant anyone-can-spend shape. (Until
+// 2026-09 SOQ-ARCH-001 rejected every confidential output block-wide while
+// SoquObscura was dormant and would have shadowed this rule; it was retired
+// with the additive-asset genesis door.)
 BOOST_AUTO_TEST_CASE(connectblock_rejects_confidential_output_in_btcsoq_authority_tx)
 {
     ScopedRegtestActivation on(Consensus::DEPLOYMENT_SOQUOBSCURA, 0);
