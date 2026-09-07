@@ -263,10 +263,16 @@ BOOST_AUTO_TEST_CASE(stagenet_maturity_mirrors_mainnet_from_the_gate_height)
 // hash and a zero seed. That happened to the stagenet maturity-mirror tier
 // (bead stagenet-mirror-tier-zeroed-genesis-lfll): GetConsensus(h >= 100000)
 // reported hashGenesisBlock == 0, CheckBlockIndex would abort on it under
-// -checkblockindex, and the consensus digest certified the zeroed tier as
-// correct. This case reads the base tier at runtime and compares every sampled
-// tier against it on every network, and also refuses an all-zero base so two
-// zeroed sides cannot agree their way past it.
+// -checkblockindex, the getprivacyparams RPC would report a zero seed, and the
+// consensus digest certified the zeroed tier as correct. This case reads the
+// base tier at runtime and compares every sampled tier against it on every
+// network, and also refuses an all-zero base so two zeroed sides cannot agree
+// their way past it.
+//
+// Reach: only tiers linked into the GetConsensus tree are observable here. On
+// mainnet and testnet digishieldConsensus is assigned but not linked (the tree
+// is consensus -> auxpowConsensus), so a defect confined to it would be
+// invisible to this case and to the digest alike; nothing reads it today.
 BOOST_AUTO_TEST_CASE(every_tier_carries_the_genesis_fields_on_every_network)
 {
     const std::string nets[] = {CBaseChainParams::MAIN, CBaseChainParams::TESTNET,

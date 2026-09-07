@@ -1484,11 +1484,9 @@ public:
         consensus.hashGenesisBlock = genesis.GetHash();
         digishieldConsensus.hashGenesisBlock = consensus.hashGenesisBlock;
         auxpowConsensus.hashGenesisBlock = consensus.hashGenesisBlock;
-        // The mirror tier was copied from auxpowConsensus BEFORE the genesis
-        // fields existed, so it carried a zero hash and a zero seed until
-        // 2026-09-07 (bead stagenet-mirror-tier-zeroed-genesis-lfll). Every
-        // tier must carry the chain's genesis fields; the digest absorbs both
-        // per tier, and genesis_chainparams_tests asserts it for every network.
+        // Every tier carries the genesis fields, including the mirror tier
+        // copied above; asserted for every network by genesis_chainparams_tests
+        // (bead stagenet-mirror-tier-zeroed-genesis-lfll).
         maturityMirrorConsensus.hashGenesisBlock = consensus.hashGenesisBlock;
         assert(consensus.hashGenesisBlock == uint256S("0x97df3ae79eaf5623c0feecfa1079439f8acdfea06a0f2acb4ef63c6b9ad91bb0"));
 

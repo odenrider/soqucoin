@@ -726,18 +726,22 @@ BOOST_AUTO_TEST_CASE(consensus_digest_is_pinned)
     // the tier had been copied from auxpowConsensus before hashGenesisBlock and
     // latticeBPSeed were assigned, so GetConsensus(h >= 100000) on stagenet
     // carried a zero hash and a zero seed, and this pin certified that as
-    // correct. No live validation path reads either field from a height tier
-    // (CheckBlockIndex compares the genesis hash only under -checkblockindex,
-    // regtest-only by default; the seed has no live consumer), so a node with
-    // and a node without this change accept identical blocks.
+    // correct. No validation, relay or mining path reads either field from a
+    // height tier: CheckBlockIndex compares the genesis hash only under
+    // -checkblockindex (regtest-only by default, and it would have fired AT
+    // height 100000, where GetConsensus first resolves to the mirror tier), and
+    // the seed's only height-tier reader is the getprivacyparams RPC
+    // (rpc/privacy.cpp), which would have reported a zero seed from that height.
+    // So a node with and a node without this change accept identical blocks.
     //
     // The absorbed inputs that move, and only these:
     //   1. stagenet GetConsensus(1000000).hashGenesisBlock, 0 -> 97df3ae7...
     //   2. stagenet GetConsensus(1000000).latticeBPSeed, all-zero -> the
     //      ComputeSoquObscuraSeed value every other stagenet tier already had.
-    // Mainnet, testnet and regtest have no tier copied before their genesis
-    // assignment, and genesis_chainparams_tests now asserts every sampled tier
-    // against the base tier on every network so this cannot recur silently.
+    // On mainnet, testnet and regtest every copied tier is listed in the
+    // assignments that follow the genesis block, and genesis_chainparams_tests
+    // now asserts every sampled tier against the base tier on every network so
+    // this cannot recur silently.
     const std::string expected =
         "e7ea83dca405f0ca831014af9ddc1022e3f194d8024c0ec2c3ef0dbb6bd7350a";
 
