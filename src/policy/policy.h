@@ -34,7 +34,7 @@ static const unsigned int DEFAULT_BLOCK_MIN_TX_FEE = (unsigned int) RECOMMENDED_
  *  SOQ-ARCH-003: Bumped from 400K to 800K for Dilithium consolidation TXs.
  *  Each Dilithium input is ~3,896 WU — at 400K, only ~100 inputs fit.
  *  800K allows 205 inputs while capping any single TX at 20% of block space.
- *  Approved: Casey Wilson, May 25 2026. See DL-SOQ-FEE-ARCHITECTURE-V3.md.
+ *  Ratified 2026-05-25. See DL-SOQ-FEE-ARCHITECTURE-V3.md.
  */
 static const unsigned int MAX_STANDARD_TX_WEIGHT = 800000;
 /** Maximum number of signature check operations in an IsStandard() P2SH script */

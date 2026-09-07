@@ -63,7 +63,7 @@ static const unsigned int MAX_PROOF_BYTES_PER_BLOCK = 262144; // 256 KB
  *    utxoCostPerByte = 325,000 / 50 = 6,500 sat/byte
  *
  *  Result: Standard 50-byte output → min 0.00325 SOQ (below policy 0.01 SOQ).
- *  Approved: Casey Wilson, May 25 2026. See DL-SOQ-FEE-ARCHITECTURE-V3.md.
+ *  Ratified 2026-05-25. See DL-SOQ-FEE-ARCHITECTURE-V3.md.
  */
 static const int64_t UTXO_COST_PER_BYTE = 6500;
 
