@@ -3,9 +3,12 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
+#include "coins.h"
 #include "policy/policy.h"
+#include "random.h"
 #include "txmempool.h"
 #include "util.h"
+#include "validation.h"
 
 #include "test/test_bitcoin.h"
 
@@ -613,6 +616,77 @@ BOOST_AUTO_TEST_CASE(MempoolEntryNoCrashOnUsdsoqImbalance)
     // The value is clamped to GetValueOut()+fee so the priority heuristic stays sane.
     BOOST_CHECK_EQUAL(entry.GetInChainInputValue(), CTransaction(tx).GetValueOut() + fee);
     BOOST_CHECK(entry.GetTxSize() > 0);
+}
+
+
+// The attack, not the rule: removeForReorg must survive a mempool entry whose
+// input coin is ABSENT from the coins view. That is not a hypothetical state —
+// it is exactly what a reorg produces when the block containing the input is
+// disconnected, and it is the condition the !coins branch below exists to
+// detect. Before this test, the height-aware maturity lookup dereferenced
+// coins->nHeight one line ABOVE the !coins test, so reaching that state
+// segfaulted the node instead of evicting the transaction.
+//
+// The assert(coins) guard on the line above the lookup does not help: it is
+// conditioned on nCheckFrequency != 0, which is 0 in production.
+BOOST_AUTO_TEST_CASE(removeForReorg_evicts_a_tx_whose_input_coin_is_gone)
+{
+    CTxMemPool pool(CFeeRate(0));
+    TestMemPoolEntryHelper entry;
+
+    CMutableTransaction tx;
+    tx.vin.resize(1);
+    tx.vin[0].prevout.hash = GetRandHash(); // never present in the view below
+    tx.vin[0].prevout.n = 0;
+    tx.vin[0].scriptSig = CScript() << OP_1;
+    tx.vout.resize(1);
+    tx.vout[0].scriptPubKey = CScript() << OP_1;
+    tx.vout[0].nValue = 10 * COIN;
+
+    // spendsCoinbase must be true or the maturity branch is never entered.
+    pool.addUnchecked(tx.GetHash(), entry.SpendsCoinbase(true).FromTx(tx));
+    BOOST_CHECK_EQUAL(pool.size(), 1U);
+
+    CCoinsView dummy;
+    CCoinsViewCache coins(&dummy); // empty: AccessCoins returns NULL
+
+    {
+        // removeForReorg reaches CheckFinalTx and CheckSequenceLocks, which
+        // AssertLockHeld(cs_main) and AssertLockHeld(mempool.cs). The LOCK(cs)
+        // inside removeForReorg takes the LOCAL pool's mutex, a different object
+        // from the global mempool.cs, so it does not satisfy them. Without these
+        // the case abort()s the whole binary under --enable-debug
+        // (DEBUG_LOCKORDER), which is exactly the build someone debugging
+        // mempool behaviour reaches for. Convention follows miner_tests.cpp.
+        LOCK(cs_main);
+        LOCK(mempool.cs);
+        pool.removeForReorg(&coins, chainActive.Height() + 1, STANDARD_LOCKTIME_VERIFY_FLAGS);
+    }
+
+    // Surviving the call is half the property; evicting the entry is the other
+    // half. A tx whose input the node can no longer find must not stay in the
+    // mempool, or it is offered to peers and mined against nothing.
+    BOOST_CHECK_EQUAL(pool.size(), 0U);
+
+    // ⛔ NEGATIVE CONTROL — without this the case can go vacuous in silence.
+    // size()==0 is also satisfied by eviction from the CheckFinalTx /
+    // CheckSequenceLocks branch ABOVE the one under test. It reaches the
+    // coinbase branch today only because TestMemPoolEntryHelper's default
+    // LockPoints makes TestLockPointValidity true, so CheckSequenceLocks takes
+    // the useExistingLockPoints shortcut and never consults the global mempool
+    // or pcoinsTip for the missing input. Change that default and the tx is
+    // evicted by the FIRST branch instead: the assertion above still passes and
+    // has quietly stopped testing the fix. The same transaction that does NOT
+    // spend a coinbase must therefore SURVIVE.
+    CTxMemPool control(CFeeRate(0));
+    TestMemPoolEntryHelper centry;
+    control.addUnchecked(tx.GetHash(), centry.SpendsCoinbase(false).FromTx(tx));
+    {
+        LOCK(cs_main);
+        LOCK(mempool.cs);
+        control.removeForReorg(&coins, chainActive.Height() + 1, STANDARD_LOCKTIME_VERIFY_FLAGS);
+    }
+    BOOST_CHECK_EQUAL(control.size(), 1U);
 }
 
 BOOST_AUTO_TEST_SUITE_END()

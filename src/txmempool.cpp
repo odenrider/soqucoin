@@ -560,8 +560,24 @@ void CTxMemPool::removeForReorg(const CCoinsViewCache* pcoins, unsigned int nMem
                     continue;
                 const CCoins* coins = pcoins->AccessCoins(txin.prevout.hash);
                 if (nCheckFrequency != 0) assert(coins);
+                // ⛔ THE NULL TEST MUST STAY ABOVE THE MATURITY LOOKUP. Bitcoin
+                // tested !coins first; the height-aware maturity lookup reads
+                // coins->nHeight and was hoisted ABOVE that test by inherited
+                // Dogecoin commit 7b81f4de0 ("Move COINBASE_MATURITY to the
+                // consensus parameters", 2018), so a missing coin dereferenced
+                // NULL. The same commit got it right in CheckTxInputs, where the
+                // lookup sits inside the IsCoinBase() branch; this was a one-file
+                // slip and upstream still carries it. AccessCoins returning NULL
+                // is the condition this branch exists to detect. The assert above
+                // is no guard: nCheckFrequency is 0 outside regtest.
+                if (!coins) {
+                    txToRemove.insert(it);
+                    break;
+                }
+                // Soqucoin: maturity is switched by height, read from the tier at
+                // the COINBASE's height (matching Consensus::CheckTxInputs).
                 int nCoinbaseMaturity = Params().GetConsensus(coins->nHeight).nCoinbaseMaturity;
-                if (!coins || (coins->IsCoinBase() && ((signed long)nMemPoolHeight) - coins->nHeight < nCoinbaseMaturity)) {
+                if (coins->IsCoinBase() && ((signed long)nMemPoolHeight) - coins->nHeight < nCoinbaseMaturity) {
                     txToRemove.insert(it);
                     break;
                 }
