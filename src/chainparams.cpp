@@ -431,7 +431,26 @@ public:
         digishieldConsensus.fSimplifiedRewards = true;
         digishieldConsensus.fDigishieldDifficultyCalculation = true;
         digishieldConsensus.nPowTargetTimespan = 60; // post-digishield: 1 minute
-        digishieldConsensus.nCoinbaseMaturity = 240;
+        // Coinbase maturity == the finality horizon (288). Ruled 2026-09-07,
+        // bead mainnet-maturity-240-not-30-mp5o.
+        //
+        // INVARIANT: nCoinbaseMaturity >= nMaxReorgDepth. The horizon rejects a
+        // fork only at depth >= nMaxReorgDepth (validation.cpp, "bad-fork-beyond-
+        // finality"), so every reorg SHALLOWER than 288 is consensus-legal and
+        // accepted. At the inherited value of 240 a coinbase became spendable 48
+        // blocks INSIDE that probabilistic window, and coinbase is the one output
+        // class whose reversal invalidates every descendant spend.
+        //
+        // The 240 came from upstream Dogecoin (it arrived with the height-aware
+        // consensus work in 2017); the 288 horizon was added here on 2026-06-23.
+        // The two constants constrain each other and were set nine years apart by
+        // different projects, so nothing had ever compared them. Do not put this
+        // back to 240 to match Dogecoin: this chain has a finality rule and
+        // Dogecoin does not, which is exactly why the values must differ.
+        //
+        // Cost: ~48 min of additional wait at 60s spacing. Absorbed by the
+        // consensus digest per tier, so this re-pins the digest deliberately.
+        digishieldConsensus.nCoinbaseMaturity = 288;
 
         // AuxPoW + DigiShield from block 1 (merged tier).
         // Both standalone Scrypt blocks (solo miners) and AuxPoW blocks
@@ -1381,8 +1400,12 @@ public:
 
         // Mainnet-maturity mirror from block 100,000 (ruled 2026-08-29, bead
         // maturity-tier-doc-divergence-x48g): coinbases MINED at height >=
-        // 100000 mature at 240 like mainnet's post-genesis tiers, so the soak
-        // exercises launch maturity. HEIGHT-GATED, not retroactive: maturity is
+        // 100000 mature like mainnet's post-genesis tiers, so the soak
+        // exercises launch maturity. Raised 240 -> 288 on 2026-09-07 alongside
+        // the mainnet change (bead mainnet-maturity-240-not-30-mp5o); the mirror
+        // is only useful while it actually mirrors. Safe to edit in place:
+        // stagenet was at height 72,864 when this landed, so the gate at 100,000
+        // had not opened and no coinbase has ever matured under this tier. HEIGHT-GATED, not retroactive: maturity is
         // read from the tier at the COINBASE's height (CheckTxInputs), so every
         // historical spend of a pre-gate coinbase stays valid and the stagenet
         // history replay (differential validation) is unaffected.
@@ -1395,7 +1418,7 @@ public:
         // consensus_digest_tests.cpp).
         maturityMirrorConsensus = auxpowConsensus;
         maturityMirrorConsensus.nHeightEffective = 100000;
-        maturityMirrorConsensus.nCoinbaseMaturity = 240;
+        maturityMirrorConsensus.nCoinbaseMaturity = 288;
         maturityMirrorConsensus.pLeft = NULL;
         maturityMirrorConsensus.pRight = NULL;
 

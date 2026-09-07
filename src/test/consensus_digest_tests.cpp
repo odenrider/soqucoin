@@ -684,8 +684,36 @@ BOOST_AUTO_TEST_CASE(consensus_digest_is_pinned)
     // (latticeBPSeed via ComputeSoquObscuraSeed). Testnet, stagenet and
     // regtest genesis inputs are untouched. The F4 sweep of record re-runs
     // against the FC4 tag on the fleet toolchain.
+    // Moved from 6f4e1b37... on 2026-09-07 when coinbase maturity was raised to
+    // the finality horizon (240 -> 288) on mainnet and on the stagenet
+    // mainnet-maturity mirror tier (bead mainnet-maturity-240-not-30-mp5o).
+    // A RULE change on both, made deliberately by ruling. The invariant being
+    // restored is nCoinbaseMaturity >= nMaxReorgDepth: the horizon rejects a
+    // fork only at depth >= 288, so at 240 a coinbase became spendable 48 blocks
+    // inside the window the chain still accepts reorgs in.
+    //
+    // The absorbed inputs that move, and only these:
+    //   1. mainnet GetConsensus(h).nCoinbaseMaturity for every sampled h >= 1
+    //      (1, 2, 9, 10, 11, 19, 20, 21, 99, 100, 101, 1000, 1000000), 240 ->
+    //      288. Height 0 is the base tier and stays 30.
+    //   2. stagenet GetConsensus(1000000).nCoinbaseMaturity, 240 -> 288 — the
+    //      only sampled height at or above the mirror gate at 100000.
+    // Testnet (still 240) and regtest (still 60) are untouched, and the diff of
+    // record is two integer assignments in chainparams.cpp and nothing else.
+    //
+    // ⚠ TESTNET CARRIES THE SAME GAP AND IS DELIBERATELY NOT FIXED HERE:
+    // it has nMaxReorgDepth 288 against maturity 240, but unlike stagenet it has
+    // no height-gated tier, so editing it in place would retroactively invalidate
+    // every past spend of a coinbase at depth 240-287. It needs a gated tier or a
+    // reset, tracked on the same bead.
+    //
+    // ⚠ FLEET DEADLINE THIS CREATES: the stagenet mirror gate opens at height
+    // 100000 and stagenet was at 72,864 on 2026-09-07 (~19 days of headroom).
+    // The fleet must run this binary before a coinbase mined at >= 100000 is
+    // spent at depth 240-287, or nodes on the old binary and nodes on this one
+    // will disagree and split stagenet.
     const std::string expected =
-        "6f4e1b37fd154fd7e845bfaa67b401a64fb3f5bd9b7a2832451c8fde5be8cfe8";
+        "a0b1e5777acce071132d36c9bb07ce97f9c7b69b3ed5f13eb9a08f66c9baa00a";
 
     BOOST_CHECK_MESSAGE(digest.ToString() == expected,
         "consensus digest is " + digest.ToString() + ", expected " + expected +

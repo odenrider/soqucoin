@@ -216,26 +216,44 @@ BOOST_AUTO_TEST_CASE(launch_ibd_thresholds_are_zero_on_every_network)
     }
 }
 
-// Stagenet mirrors mainnet's effective coinbase maturity (240) from height
-// 100,000, HEIGHT-GATED so historical spends of pre-gate coinbases stay valid
-// and the stagenet history replay is unaffected (ruled 2026-08-29, bead
+// Stagenet mirrors mainnet's effective coinbase maturity from height 100,000,
+// HEIGHT-GATED so historical spends of pre-gate coinbases stay valid and the
+// stagenet history replay is unaffected (ruled 2026-08-29, bead
 // maturity-tier-doc-divergence-x48g). Maturity is read from the tier at the
 // COINBASE's height, so the boundary below is about when a coinbase was MINED.
+//
+// ⛔ THE MIRROR IS ASSERTED AGAINST MAINNET'S ACTUAL VALUE, NOT AGAINST A SECOND
+// LITERAL. The earlier version of this case pinned 240 independently on both
+// networks. That reads as a coupling but is not one: it is two separate facts
+// that happen to agree, and the failure it cannot catch is the one that matters —
+// somebody changes mainnet, updates the mainnet literal because that is the line
+// the compiler pointed at, and the "mirror" silently stops mirroring. Reading the
+// mainnet value at runtime makes drift impossible to express.
 BOOST_AUTO_TEST_CASE(stagenet_maturity_mirrors_mainnet_from_the_gate_height)
 {
+    // Mainnet's effective maturity from height 1 — the value being mirrored.
+    SelectParams(CBaseChainParams::MAIN);
+    const uint32_t mainnetMaturity = Params().GetConsensus(1).nCoinbaseMaturity;
+    BOOST_CHECK_EQUAL(Params().GetConsensus(1000000).nCoinbaseMaturity, mainnetMaturity);
+
+    // One literal pin, so a silent change to mainnet still fails loudly here and
+    // not only in the consensus digest. 288 == the finality horizon
+    // (bead mainnet-maturity-240-not-30-mp5o); see
+    // maturity_covers_finality_horizon_mainnet for why they must be equal.
+    BOOST_CHECK_EQUAL(mainnetMaturity, 288u);
+
     SelectParams(CBaseChainParams::STAGENET);
+    // Below the gate: the base tier, untouched so replayed history stays valid.
     BOOST_CHECK_EQUAL(Params().GetConsensus(0).nCoinbaseMaturity, 30);
     BOOST_CHECK_EQUAL(Params().GetConsensus(1).nCoinbaseMaturity, 30);
     BOOST_CHECK_EQUAL(Params().GetConsensus(100).nCoinbaseMaturity, 30);
     BOOST_CHECK_EQUAL(Params().GetConsensus(99999).nCoinbaseMaturity, 30);
-    BOOST_CHECK_EQUAL(Params().GetConsensus(100000).nCoinbaseMaturity, 240);
-    BOOST_CHECK_EQUAL(Params().GetConsensus(100001).nCoinbaseMaturity, 240);
-    BOOST_CHECK_EQUAL(Params().GetConsensus(1000000).nCoinbaseMaturity, 240);
+    // At and above the gate: whatever mainnet does, exactly.
+    BOOST_CHECK_EQUAL(Params().GetConsensus(100000).nCoinbaseMaturity, mainnetMaturity);
+    BOOST_CHECK_EQUAL(Params().GetConsensus(100001).nCoinbaseMaturity, mainnetMaturity);
+    BOOST_CHECK_EQUAL(Params().GetConsensus(1000000).nCoinbaseMaturity, mainnetMaturity);
 
-    // The value being mirrored: mainnet's effective maturity from height 1.
     SelectParams(CBaseChainParams::MAIN);
-    BOOST_CHECK_EQUAL(Params().GetConsensus(1).nCoinbaseMaturity, 240);
-    BOOST_CHECK_EQUAL(Params().GetConsensus(1000000).nCoinbaseMaturity, 240);
 }
 
 // ============================================================================
@@ -620,6 +638,82 @@ BOOST_AUTO_TEST_CASE(f8_bip_activation_heights_are_soqucoin_not_dogecoin)
     BOOST_CHECK_EQUAL(mainBIP65, sg.BIP65Height);
     BOOST_CHECK_EQUAL(mainBIP66, sg.BIP66Height);
 
+    SelectParams(CBaseChainParams::MAIN);
+}
+
+// ---------------------------------------------------------------------------
+// Coinbase maturity vs the finality horizon (bead mainnet-maturity-240-not-30-mp5o).
+//
+// THE DEFECT THIS EXISTS TO CATCH, stated as the attack rather than as the rule:
+// the horizon rejects a fork only once it is nMaxReorgDepth blocks DEEP, so every
+// reorg shallower than that is consensus-legal and accepted. If a coinbase becomes
+// spendable before that depth, an attacker who can rent enough hashpower to reorg
+// (say) 260 blocks can un-mine a coinbase that has already matured AND been spent,
+// invalidating every descendant transaction. Coinbase is the one output class where
+// this cascades, and it is the class this chain's own pool creates continuously.
+//
+// This test exists because the two constants were set NINE YEARS APART by different
+// projects — 240 arrived with upstream Dogecoin in 2017, the 288-block horizon was
+// added here on 2026-06-23 — and nothing in the tree ever compared them. A green
+// suite is not evidence; the comparison simply did not exist until this case did.
+//
+// Both values are consensus and both are absorbed by the consensus digest, so a
+// change to either after genesis is a hard fork.
+static void CheckMaturityCoversFinality(const char* net, int sampleHeight)
+{
+    const Consensus::Params& c = Params().GetConsensus(sampleHeight);
+
+    // A disabled horizon (regtest) means there is nothing to cover.
+    if (c.nMaxReorgDepth <= 0) return;
+
+    BOOST_CHECK_MESSAGE(
+        (int64_t)c.nCoinbaseMaturity >= (int64_t)c.nMaxReorgDepth,
+        net << ": coinbase matures at " << c.nCoinbaseMaturity
+            << " blocks but the chain still accepts reorgs up to "
+            << (c.nMaxReorgDepth - 1) << " deep (nMaxReorgDepth "
+            << c.nMaxReorgDepth << "). A matured, spent coinbase can therefore be "
+               "un-mined. Raise nCoinbaseMaturity to at least nMaxReorgDepth, or "
+               "lower the horizon — but note that lowering it also shrinks the "
+               "witness-pruned serving window, which is advertised as "
+               "NODE_NETWORK_LIMITED and promises peers the last 288 blocks.");
+}
+
+BOOST_AUTO_TEST_CASE(maturity_covers_finality_horizon_mainnet)
+{
+    SelectParams(CBaseChainParams::MAIN);
+    // Height 0 is the genesis tier; the genesis coinbase is unspendable, so the
+    // property is asserted from height 1 where real coinbases live.
+    CheckMaturityCoversFinality("mainnet h=1", 1);
+    CheckMaturityCoversFinality("mainnet h=1000000", 1000000);
+}
+
+BOOST_AUTO_TEST_CASE(maturity_covers_finality_horizon_stagenet)
+{
+    SelectParams(CBaseChainParams::STAGENET);
+    // Above the mainnet-maturity mirror gate at 100000, stagenet must reproduce
+    // the mainnet property or the soak is not rehearsing launch maturity.
+    CheckMaturityCoversFinality("stagenet h=1000000", 1000000);
+    SelectParams(CBaseChainParams::MAIN);
+}
+
+// ⛔ TESTNET IS A KNOWN, DELIBERATE EXCEPTION — DO NOT "FIX" IT BY EDITING
+// chainparams IN PLACE. Testnet carries the same gap (maturity 240 against a 288
+// horizon), but it has no height-gated maturity tier, so raising the value in place
+// would retroactively invalidate every past spend of a coinbase at depth 240-287 and
+// split or strand the chain. It needs a height-gated tier or a reset, tracked on
+// bead mainnet-maturity-240-not-30-mp5o.
+//
+// This case asserts the EXCEPTION, so the day testnet is fixed this test fails and
+// says so — the exception cannot outlive its cause silently.
+BOOST_AUTO_TEST_CASE(maturity_below_finality_horizon_testnet_known_exception)
+{
+    SelectParams(CBaseChainParams::TESTNET);
+    const Consensus::Params& c = Params().GetConsensus(1);
+    BOOST_CHECK_MESSAGE(
+        (int64_t)c.nCoinbaseMaturity < (int64_t)c.nMaxReorgDepth,
+        "testnet coinbase maturity now covers the finality horizon. If that was "
+        "done on purpose, delete this case and add testnet to "
+        "maturity_covers_finality_horizon_* instead.");
     SelectParams(CBaseChainParams::MAIN);
 }
 
