@@ -97,7 +97,7 @@ PAT, the Practical **Attestation** Technique: Dilithium batch attestation via
 2026-08-31: PAT's attestation is block metadata — a commitment in the coinbase,
 validated in `ConnectBlock` — and not an output type. **Witness v2 is
 permanently unfundable at consensus, unconditionally and not gated on this
-deployment** (`validation.cpp` `versionActive` case 2). Read the flag as "the
+deployment** (the v2 creation rule in `ConnectBlock`). Read the flag as "the
 PAT commitment rules are in force", never as a witness-version gate.
 
 The reason is recorded because it is counter-intuitive: the v2 spend path binds
@@ -205,14 +205,12 @@ Stablecoin authority opcodes, witness v5 (authority) and v7 (holdings).
    is compound-gated on USDSOQ **and** SOQUOBSCURA, and fails closed when both are
    active. Activating both without satisfying the SoquObscura row above turns a
    fail-closed reject into a live confidential path with no verifier.
-5. ☐ **This activation is also a PAT attestation change.** Under
-   `doc/PAT_BLOCK_ATTESTATION.md` §2 (Decision 1, ruled 2026-09-01), v7 holdings
-   join the attested set at this height: every node's recomputed block
-   attestation changes definition at the activation boundary, which is exactly
-   the divergence class the attestation specification exists to prevent. The
-   attested-set tests must pass with the deployment active and withdrawn, and
-   the fleet-coverage requirement of rule 2 applies to the attestation rule as
-   much as to the opcodes.
+5. ☑ **Not an attestation change** (amended 2026-09-07). The PAT attested set
+   is fixed at v0/v1/v7/v8 for every height (`doc/PAT_BLOCK_ATTESTATION.md` §2,
+   Decision 1 as amended), so this activation does not change any node's
+   recomputed block attestation. The earlier "joins at this height" rule was
+   removed with the additive-asset genesis door because an activation-dependent
+   attested set is a hard fork.
 
 ### `DEPLOYMENT_BTCSOQ` (bit 14)
 Bitcoin-backed consensus asset, witness v8 (holding) and v9 (authority).
@@ -226,12 +224,10 @@ Bitcoin-backed consensus asset, witness v8 (holding) and v9 (authority).
    field is 64-byte Ed25519-shaped, which cannot carry ML-DSA-44 (bead `23q1`).
    ⛔ This violates the standing rule: ML-DSA-44 only in the bridge signing path.
 4. ☐ Halborn Phase 2 clearance for the BTCSOQ layer.
-5. ☐ **This activation is also a PAT attestation change.** Under
-   `doc/PAT_BLOCK_ATTESTATION.md` §2 (Decision 1, ruled 2026-09-01), v8 holdings
-   join the attested set at this height. Same obligation as the corresponding
-   USDSOQ precondition: the attested-set tests must pass with the deployment
-   active and withdrawn, and full fleet coverage before the height applies to
-   the attestation rule as much as to the opcodes.
+5. ☑ **Not an attestation change** (amended 2026-09-07). Same as the USDSOQ
+   row: the attested set is fixed at v0/v1/v7/v8, so v8 is attested at every
+   height and this activation leaves every node's recomputed attestation
+   unchanged.
 
 ### `DEPLOYMENT_CTV` (bit 7), `DEPLOYMENT_APO` (bit 8), `DEPLOYMENT_CSFS` (bit 9)
 BIP 119 `OP_CHECKTEMPLATEVERIFY`, BIP 118 `SIGHASH_ANYPREVOUT`, BIP 348

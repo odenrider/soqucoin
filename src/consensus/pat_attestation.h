@@ -27,13 +27,16 @@
 
 namespace patattest {
 
-//! Which fall-through witness versions are in the attested set at this block's
-//! height (spec §2, Decision 1: v7 joins at USDSOQ activation, v8 at BTCSOQ
-//! activation). The caller derives these from DeploymentActiveAtHeight; this
-//! module takes facts, not chain state.
+//! Parameters of the attested-set rule. Since the additive-asset genesis door
+//! (2026-09) the set is FIXED — v0/v1/v7/v8 two-item spends, independent of
+//! any deployment — because a set that changes at an activation height makes
+//! the block commitment disagree between a genesis node and an upgraded one
+//! (a hard fork). The two flags are retained so the collector's interface and
+//! the spec's disposition-table tests keep their shape; IsAttestedVersion no
+//! longer consults them.
 struct AttestedSetParams {
-    bool fUsdsoqActive = false;
-    bool fBtcsoqActive = false;
+    bool fUsdsoqActive = false;   // no longer consulted
+    bool fBtcsoqActive = false;   // no longer consulted
 };
 
 //! Witness version of the one canonical Soqucoin shape, OP_N <32 bytes>
@@ -42,9 +45,9 @@ struct AttestedSetParams {
 //! dispatch; those three must never diverge.
 int WitnessVersionOf(const CScript& scriptPubKey);
 
-//! The attested-set rule of spec §2: v0/v1 always; v7/v8 per params. Every
-//! other version is never attested, each for the reason recorded in the
-//! spec's disposition table.
+//! The attested-set rule of spec §2: v0/v1/v7/v8 always (the two-item
+//! single-key shapes). Every other version is never attested, each for the
+//! reason recorded in the spec's disposition table.
 bool IsAttestedVersion(int version, const AttestedSetParams& params);
 
 //! One block's batch, as the three parallel vectors CreateLogarithmicProof

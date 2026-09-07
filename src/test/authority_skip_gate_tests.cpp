@@ -21,10 +21,14 @@
 // has (mainnet defines no authority keys either, and additionally ships the
 // deployment NOT_SCHEDULED). So regtest reproduces the mainnet gap exactly.
 //
-// FIXED by SOQ-I009 (see validation.cpp): the skip is now gated on the same
-// deployment flag + initialised authority as the verifier that replaces it,
-// and the v5/v7/v8/v9 shapes are reserved from genesis. Every case below now
-// asserts the SAFE outcome, so the file is a regression guard, not a repro.
+// FIXED by SOQ-I009 (see validation.cpp): the skip is now granted only when
+// the deployment is active AND the authority is initialised — the same two
+// guards as the verifier that replaces it. With the deployment DORMANT an
+// authority-shaped tx is an ordinary tx and every input runs ordinary script
+// verification (the additive-asset genesis door, 2026-09, replaced the
+// earlier outright rejection of that shape: a rejection the activation
+// release would have to relax is a hard fork). Every case below asserts the
+// SAFE outcome, so the file is a regression guard, not a repro.
 //
 // The cases below are byte-identical except for ONE opcode in one output:
 // OP_1 (control) vs OP_5 (attack). Both carry the same deliberately invalid
@@ -286,20 +290,31 @@ BOOST_AUTO_TEST_CASE(op5_marker_does_not_skip_script_verification)
 }
 
 // Same forgery under MAINNET posture: DEPLOYMENT_USDSOQ withdrawn, exactly as
-// CMainParams ships it. Here the deployment gate is what must catch it.
-BOOST_AUTO_TEST_CASE(op5_marker_rejected_when_usdsoq_not_scheduled)
+// CMainParams ships it. No skip is granted while the deployment is dormant, so
+// the forged 6-item witness on someone else's coin is verified like any other
+// input and fails in VerifyScript — the same path as the control, and like the
+// control it has no reject string to pin. (Until 2026-09 this was an outright
+// "bad-usdsoq-authority-not-active" rejection; that rejection would have been
+// relaxed by the activation release, which is a hard fork, so it became a
+// fall-through to ordinary verification.)
+BOOST_AUTO_TEST_CASE(op5_marker_does_not_skip_scripts_when_usdsoq_not_scheduled)
 {
     UpdateRegtestActivationHeight(Consensus::DEPLOYMENT_USDSOQ,
                                   Consensus::BIP9Deployment::NOT_SCHEDULED);
     SelectParams(CBaseChainParams::REGTEST);
 
-    const std::string why = RejectReasonFor({ BuildForgedAuthoritySteal(coinbaseTxns[1], 5) });
+    const int heightBefore = chainActive.Height();
+    std::vector<CMutableTransaction> txns{ BuildForgedAuthoritySteal(coinbaseTxns[1], 5) };
+    CBlock b = CreateAndProcessBlock(txns, victimSpk);
 
     UpdateRegtestActivationHeight(Consensus::DEPLOYMENT_USDSOQ, 0);  // restore
     SelectParams(CBaseChainParams::REGTEST);
 
-    BOOST_TEST_MESSAGE("reject: '" << why << "'");
-    BOOST_CHECK_EQUAL(why, "bad-usdsoq-authority-not-active");
+    BOOST_CHECK_MESSAGE(chainActive.Tip()->GetBlockHash() != b.GetHash(),
+        "STEAL CONNECTED: with DEPLOYMENT_USDSOQ dormant, an OP_5 marker plus an "
+        "authority-shaped witness skipped script verification and spent someone "
+        "else's coin. The skip must never be granted without the verifier.");
+    BOOST_CHECK_EQUAL(chainActive.Height(), heightBefore);
 }
 
 // The BTCSOQ twin, with BTCSOQ ACTIVE (stock regtest). Unlike USDSOQ, the
@@ -316,23 +331,28 @@ BOOST_AUTO_TEST_CASE(op9_marker_caught_when_btcsoq_deployment_active)
 }
 
 // The BTCSOQ twin under MAINNET posture: DEPLOYMENT_BTCSOQ withdrawn, exactly
-// as CMainParams ships it. SCRIPT_VERIFY_BTCSOQ is then never set, so the
-// entire ConnectBlock BTCSOQ block — default-deny included — is skipped, while
-// the CheckInputs skip is unchanged.
-BOOST_AUTO_TEST_CASE(op9_marker_skips_scripts_when_btcsoq_not_scheduled)
+// as CMainParams ships it. SCRIPT_VERIFY_BTCSOQ is never set, so no skip is
+// granted and the forged witness fails ordinary script verification, exactly
+// as in the USDSOQ case above.
+BOOST_AUTO_TEST_CASE(op9_marker_does_not_skip_scripts_when_btcsoq_not_scheduled)
 {
     UpdateRegtestActivationHeight(Consensus::DEPLOYMENT_BTCSOQ,
                                   Consensus::BIP9Deployment::NOT_SCHEDULED);
     SelectParams(CBaseChainParams::REGTEST);
 
-    const std::string why = RejectReasonFor({
-        BuildForgedAuthoritySteal(coinbaseTxns[2], 9, BTCSOQ_OP_MINT) });
+    const int heightBefore = chainActive.Height();
+    std::vector<CMutableTransaction> txns{
+        BuildForgedAuthoritySteal(coinbaseTxns[2], 9, BTCSOQ_OP_MINT) };
+    CBlock b = CreateAndProcessBlock(txns, victimSpk);
 
     UpdateRegtestActivationHeight(Consensus::DEPLOYMENT_BTCSOQ, 0);  // restore
     SelectParams(CBaseChainParams::REGTEST);
 
-    BOOST_TEST_MESSAGE("reject: '" << why << "'");
-    BOOST_CHECK_EQUAL(why, "bad-btcsoq-authority-not-active");
+    BOOST_CHECK_MESSAGE(chainActive.Tip()->GetBlockHash() != b.GetHash(),
+        "STEAL CONNECTED: with DEPLOYMENT_BTCSOQ dormant, a v9 marker plus an "
+        "authority-shaped witness skipped script verification and spent someone "
+        "else's coin. The skip must never be granted without the verifier.");
+    BOOST_CHECK_EQUAL(chainActive.Height(), heightBefore);
 }
 
 // Positive control: SOQ-I009 must not break ordinary spending. A correctly

@@ -147,23 +147,24 @@ BOOST_AUTO_TEST_CASE(find_commitments_counts_every_match)
 
 // Fails if the version rule drifts from the spec's disposition table in either
 // direction: a version wrongly attested changes every affected block's
-// commitment; a version wrongly excluded breaks the Decision 1 extension.
+// commitment; a version wrongly excluded changes it the other way. The set is
+// FIXED and must not depend on deployment state: a set that changed at an
+// activation height would make the genesis binary and the activation release
+// recompute different commitments over the same block (a hard fork).
 BOOST_AUTO_TEST_CASE(attested_set_matches_the_disposition_table)
 {
-    patattest::AttestedSetParams off;                 // genesis posture
-    patattest::AttestedSetParams on;                  // both deployments active
+    patattest::AttestedSetParams off;                 // flags clear
+    patattest::AttestedSetParams on;                  // flags set (must be ignored)
     on.fUsdsoqActive = true;
     on.fBtcsoqActive = true;
 
     for (int v = -1; v <= 17; ++v) {
-        const bool baseForm = (v == 0 || v == 1);
-        BOOST_CHECK_MESSAGE(patattest::IsAttestedVersion(v, off) == baseForm,
-            "genesis attested set must be exactly {v0, v1}; disagreed at v" << v);
+        const bool attested = (v == 0 || v == 1 || v == 7 || v == 8);
+        BOOST_CHECK_MESSAGE(patattest::IsAttestedVersion(v, off) == attested,
+            "attested set must be exactly {v0, v1, v7, v8}; disagreed at v" << v);
 
-        const bool extended = baseForm || v == 7 || v == 8;
-        BOOST_CHECK_MESSAGE(patattest::IsAttestedVersion(v, on) == extended,
-            "fully-activated attested set must be exactly {v0, v1, v7, v8}; "
-            "disagreed at v" << v);
+        BOOST_CHECK_MESSAGE(patattest::IsAttestedVersion(v, on) == patattest::IsAttestedVersion(v, off),
+            "the attested set must not depend on deployment flags; disagreed at v" << v);
     }
 }
 
@@ -226,17 +227,18 @@ BOOST_AUTO_TEST_CASE(both_pubkey_encodings_attest_identically)
         "of the canonical stripped form (spec section 3, Decision 2).");
 }
 
-// The Decision 1 activation boundary. Fails in one direction if v7 spends are
-// attested at genesis posture (the set silently widened), and in the other if
-// activation does not extend the set (the ruling not implemented).
-BOOST_AUTO_TEST_CASE(v7_joins_the_attested_set_only_at_activation)
+// A v7 two-item spend is attested in EVERY deployment state. Fails if the
+// collector starts consulting the flags again: a genesis node (flags clear)
+// and an activation-release node (flags set) would then build different
+// batches over the same block and reject each other's commitments.
+BOOST_AUTO_TEST_CASE(v7_is_attested_regardless_of_activation_state)
 {
     CTxOut prevout;
     const CBlock block = BlockSpending(coinbaseTxns[2], Spk(OP_7), prevout);
 
     patattest::AttestedSetParams genesis;
     BOOST_CHECK_EQUAL(
-        patattest::CollectBatch(block, LookupReturning(prevout), genesis).size(), 0u);
+        patattest::CollectBatch(block, LookupReturning(prevout), genesis).size(), 1u);
 
     patattest::AttestedSetParams activated;
     activated.fUsdsoqActive = true;
