@@ -7,7 +7,8 @@
  * @brief Comprehensive tests for consensus-critical validation rules
  *
  * These tests verify:
- * 1. COINBASE_MATURITY enforcement (240 blocks for Soqucoin)
+ * 1. COINBASE_MATURITY enforcement (288 blocks on Soqucoin mainnet; this file's
+ *    fixture is regtest, where the value is 60)
  * 2. Block timestamp validation (median time past, 2-hour future limit)
  * 3. Integration with mempool and block validation
  *
@@ -50,24 +51,31 @@ BOOST_FIXTURE_TEST_SUITE(consensus_validation_tests, TestingSetup)
 /**
  * Test: Verify COINBASE_MATURITY constant is set appropriately
  *
- * Different networks use different maturity values:
- * - Mainnet: 30 pre-DigiShield, 240 post-DigiShield
- * - Testnet: Same as mainnet
- * - Regtest: 60 for easier testing
- * - Stagenet: 30 (mainnet mirror)
+ * Different networks use different maturity values (chainparams.cpp):
+ * - Mainnet:  30 at height 0, 288 from height 1 (== nMaxReorgDepth)
+ * - Testnet:  30 at height 0, 240 from height 1 — NOT the same as mainnet; a
+ *             known exception, see maturity_below_finality_horizon_testnet_*
+ *             in genesis_chainparams_tests.cpp
+ * - Regtest:  60 for easier testing (the value this fixture actually sees)
+ * - Stagenet: 30, then 288 from the mainnet-maturity mirror gate at 100000
  */
 BOOST_AUTO_TEST_CASE(verify_coinbase_maturity_constant)
 {
     // Get consensus params
     const Consensus::Params& paramsGenesis = Params().GetConsensus(0);
 
-    // Verify maturity is set to a reasonable value (30-240 range)
-    BOOST_CHECK(paramsGenesis.nCoinbaseMaturity >= 30);
-    BOOST_CHECK(paramsGenesis.nCoinbaseMaturity <= 240);
+    // This fixture is TestingSetup, i.e. regtest, so paramsGenesis is regtest's
+    // genesis tier and the value is deterministically 60 — pin it. The previous
+    // form was a range check (>= 30 && <= 240, later 288), which is strictly
+    // weaker: it stayed green for any drift inside the range, and regtest's 60 is
+    // pinned nowhere else in src/test/. This case cannot say anything about
+    // mainnet; the per-network values and the maturity-vs-finality invariant are
+    // asserted for real in genesis_chainparams_tests.cpp.
+    BOOST_CHECK_EQUAL(paramsGenesis.nCoinbaseMaturity, 60u);
 
     // Document network-specific values
-    // Mainnet post-DigiShield: 240 blocks * 60 sec = 4 hours
-    // Stagenet: 30 blocks * 60 sec = 30 minutes
+    // Mainnet from height 1: 288 blocks * 60 sec = 4.8 hours (== nMaxReorgDepth)
+    // Regtest (this fixture): 60 blocks
 }
 
 /**

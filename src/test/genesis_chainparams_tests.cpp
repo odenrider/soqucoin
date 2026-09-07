@@ -659,12 +659,35 @@ BOOST_AUTO_TEST_CASE(f8_bip_activation_heights_are_soqucoin_not_dogecoin)
 //
 // Both values are consensus and both are absorbed by the consensus digest, so a
 // change to either after genesis is a hard fork.
+//
+// ⚠ SCOPE OF THE PROPERTY, so the next reader does not overclaim it. The horizon
+// is enforced in exactly one place, ContextualCheckBlockHeader, and only when a
+// header is FIRST accepted — AcceptBlockHeader returns early for a header already
+// in mapBlockIndex, so the check never re-runs. Headers accepted while a fork is
+// still shallow, with the blocks withheld and released later, can therefore still
+// drive a deep reorg. Satisfying this invariant closes the header-arrives-on-time
+// case, which is the reachable one, and not every case. Tracked as bead
+// finality-horizon-header-only-8p5y; see doc/PAT_WITNESS_PRUNING.md §6.
 static void CheckMaturityCoversFinality(const char* net, int sampleHeight)
 {
     const Consensus::Params& c = Params().GetConsensus(sampleHeight);
 
-    // A disabled horizon (regtest) means there is nothing to cover.
-    if (c.nMaxReorgDepth <= 0) return;
+    // NO SILENT SKIP. This used to return early when nMaxReorgDepth <= 0,
+    // nominally for regtest — but no caller passes regtest, so the only thing
+    // that escape could ever do is let a zeroed mainnet horizon report SUCCESS
+    // here: the invariant becomes unassertable and the case says nothing is
+    // wrong. The tree was not defenceless — nMaxReorgDepth is an absorbed digest
+    // input (consensus_digest_tests.cpp), so consensus_digest_is_pinned fails on
+    // that mutation regardless — but a case that cannot fail is not a case, and
+    // the digest tells you "something moved", not which invariant broke. Assert
+    // the horizon EXISTS first, then assert it is covered.
+    BOOST_REQUIRE_MESSAGE(c.nMaxReorgDepth > 0,
+        net << ": nMaxReorgDepth is " << c.nMaxReorgDepth << ", so the finality "
+               "horizon is DISABLED on a network that is required to have one. "
+               "Disabling it does not satisfy this invariant, it deletes the "
+               "reason the invariant exists. If a network without a horizon is "
+               "genuinely being added, give it its own case rather than widening "
+               "this helper.");
 
     BOOST_CHECK_MESSAGE(
         (int64_t)c.nCoinbaseMaturity >= (int64_t)c.nMaxReorgDepth,
@@ -692,7 +715,18 @@ BOOST_AUTO_TEST_CASE(maturity_covers_finality_horizon_stagenet)
     SelectParams(CBaseChainParams::STAGENET);
     // Above the mainnet-maturity mirror gate at 100000, stagenet must reproduce
     // the mainnet property or the soak is not rehearsing launch maturity.
+    CheckMaturityCoversFinality("stagenet h=100000 (the gate)", 100000);
     CheckMaturityCoversFinality("stagenet h=1000000", 1000000);
+
+    // ⚠ SCOPE: only the mirror tier is asserted, and a green result here does NOT
+    // mean "stagenet is covered". BELOW the gate stagenet runs maturity 30 against
+    // the same 288 horizon — a 258-block gap, five times wider than the 48-block
+    // testnet gap that gets a named exception case below, and it is the tier the
+    // chain is actually running on today. That is deliberate and deliberately not
+    // fixed: stagenet is a disposable soak chain that is reset for mainnet, the
+    // gated tier already carries the launch value from 100000, and editing the
+    // pre-gate tier in place would retroactively invalidate replayed history for
+    // no benefit. Asserted as an exception below so it cannot outlive its cause.
     SelectParams(CBaseChainParams::MAIN);
 }
 
@@ -714,6 +748,25 @@ BOOST_AUTO_TEST_CASE(maturity_below_finality_horizon_testnet_known_exception)
         "testnet coinbase maturity now covers the finality horizon. If that was "
         "done on purpose, delete this case and add testnet to "
         "maturity_covers_finality_horizon_* instead.");
+    SelectParams(CBaseChainParams::MAIN);
+}
+
+// ⛔ STAGENET BELOW THE MIRROR GATE IS THE SECOND KNOWN EXCEPTION, and the wider
+// one: maturity 30 against the 288 horizon. It is the tier the live soak chain is
+// running on right now. Left alone on purpose — stagenet is reset for mainnet and
+// the gated tier at 100000 already carries the launch value, so editing the
+// pre-gate tier would retroactively invalidate replayed history to protect a
+// throwaway chain. Asserted here so that "stagenet is fine" is never inferred from
+// maturity_covers_finality_horizon_stagenet, which only samples the mirror tier.
+BOOST_AUTO_TEST_CASE(maturity_below_finality_horizon_stagenet_pregate_known_exception)
+{
+    SelectParams(CBaseChainParams::STAGENET);
+    const Consensus::Params& c = Params().GetConsensus(99999);
+    BOOST_CHECK_MESSAGE(
+        (int64_t)c.nCoinbaseMaturity < (int64_t)c.nMaxReorgDepth,
+        "stagenet's pre-gate tier now covers the finality horizon. If that was "
+        "done on purpose, delete this case; if it happened by accident, it "
+        "retroactively invalidated replayed stagenet history.");
     SelectParams(CBaseChainParams::MAIN);
 }
 

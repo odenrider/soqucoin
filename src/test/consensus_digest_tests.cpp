@@ -684,6 +684,7 @@ BOOST_AUTO_TEST_CASE(consensus_digest_is_pinned)
     // (latticeBPSeed via ComputeSoquObscuraSeed). Testnet, stagenet and
     // regtest genesis inputs are untouched. The F4 sweep of record re-runs
     // against the FC4 tag on the fleet toolchain.
+    //
     // Moved from 6f4e1b37... on 2026-09-07 when coinbase maturity was raised to
     // the finality horizon (240 -> 288) on mainnet and on the stagenet
     // mainnet-maturity mirror tier (bead mainnet-maturity-240-not-30-mp5o).
@@ -701,11 +702,17 @@ BOOST_AUTO_TEST_CASE(consensus_digest_is_pinned)
     // Testnet (still 240) and regtest (still 60) are untouched, and the diff of
     // record is two integer assignments in chainparams.cpp and nothing else.
     //
-    // ⚠ TESTNET CARRIES THE SAME GAP AND IS DELIBERATELY NOT FIXED HERE:
-    // it has nMaxReorgDepth 288 against maturity 240, but unlike stagenet it has
-    // no height-gated tier, so editing it in place would retroactively invalidate
-    // every past spend of a coinbase at depth 240-287. It needs a gated tier or a
-    // reset, tracked on the same bead.
+    // ⚠ TWO NETWORKS STILL CARRY THE GAP AND ARE DELIBERATELY NOT FIXED HERE.
+    // Testnet has nMaxReorgDepth 288 against maturity 240 and, unlike stagenet,
+    // no height-gated tier at all, so editing it in place would retroactively
+    // invalidate every past spend of a coinbase at depth 240-287. It needs a
+    // gated tier or a reset, tracked on the same bead. Stagenet BELOW its gate
+    // carries the wider gap — maturity 30 against the same 288 — and it is the
+    // tier the live soak chain runs on; it stays because stagenet is reset for
+    // mainnet and the gated tier already carries the launch value. Do not read
+    // the fix above as "only testnet is exposed". Both are asserted as named
+    // exceptions in genesis_chainparams_tests.cpp so neither can outlive its
+    // cause silently.
     //
     // ⚠ FLEET DEADLINE THIS CREATES: the stagenet mirror gate opens at height
     // 100000 and stagenet was at 72,864 on 2026-09-07 (~19 days of headroom).

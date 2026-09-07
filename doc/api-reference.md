@@ -278,7 +278,7 @@ Gracefully stops the node.
 |-----------|-------|-------|
 | Chain ID | `0x5351` (21329) | Used in AuxPoW header |
 | Block Time | 60 seconds | DigiShield adjustment |
-| Coinbase Maturity | 100 blocks | Before reward spendable |
+| Coinbase Maturity | Mainnet 288 (from height 1; 30 at height 0); testnet 240; regtest 60 | Before reward spendable. On mainnet it equals the finality horizon `nMaxReorgDepth`; testnet is a deliberate exception |
 | **Mainnet P2P** | 33388 | Public P2P connections |
 | **Mainnet RPC** | 33389 | Local RPC only |
 | **Testnet P2P** | 44556 | Testnet P2P connections |

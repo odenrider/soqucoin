@@ -109,7 +109,7 @@ The Soqucoin-Solana Gateway enables bidirectional transfer of value between the 
 | **Relayer collusion** | Threshold signature, geographic distribution |
 | **Smart contract bugs** | Audit before launch, timelocked upgrades |
 | **Solana outages** | Queue deposits, process on recovery |
-| **Soqucoin reorgs** | Wait for 240+ confirmations (coinbase maturity) |
+| **Soqucoin reorgs** | Wait for 288+ confirmations. That is the chain's own finality horizon (`nMaxReorgDepth`), and coinbase maturity now equals it (`chainparams.cpp`, `nCoinbaseMaturity = 288`). The horizon is enforced when a header is first accepted and is not re-checked, so treat 288 as the practical bound, not an absolute one: bead `finality-horizon-header-only-8p5y`, `doc/PAT_WITNESS_PRUNING.md` §6 |
 | **Key compromise** | Hardware security modules, rotation procedures |
 
 ### Out of Scope (v1)

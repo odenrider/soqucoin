@@ -441,6 +441,18 @@ public:
         // blocks INSIDE that probabilistic window, and coinbase is the one output
         // class whose reversal invalidates every descendant spend.
         //
+        // ⚠ WHAT THIS BUYS, STATED HONESTLY. The horizon is enforced in exactly
+        // one place — ContextualCheckBlockHeader — and only when a header is
+        // FIRST accepted: AcceptBlockHeader returns early for a header already in
+        // mapBlockIndex, so the check never re-runs. An attacker who gets headers
+        // accepted while the fork is still shallow and then WITHHOLDS the blocks
+        // can still force a deep reorg when they are finally released. This
+        // invariant therefore closes the header-arrives-on-time case, which is
+        // the reachable one, and not every case. Do NOT restate it as "finality
+        // is absolute" — the residual is real, is tracked as bead
+        // finality-horizon-header-only-8p5y, and is written up in
+        // doc/PAT_WITNESS_PRUNING.md §6.
+        //
         // The 240 came from upstream Dogecoin (it arrived with the height-aware
         // consensus work in 2017); the 288 horizon was added here on 2026-06-23.
         // The two constants constrain each other and were set nine years apart by
@@ -1405,14 +1417,40 @@ public:
         // the mainnet change (bead mainnet-maturity-240-not-30-mp5o); the mirror
         // is only useful while it actually mirrors. Safe to edit in place:
         // stagenet was at height 72,864 when this landed, so the gate at 100,000
-        // had not opened and no coinbase has ever matured under this tier. HEIGHT-GATED, not retroactive: maturity is
-        // read from the tier at the COINBASE's height (CheckTxInputs), so every
-        // historical spend of a pre-gate coinbase stays valid and the stagenet
-        // history replay (differential validation) is unaffected.
-        // ⚠ OPERATIONAL CONSTRAINT: the FC4 fleet deploy must COMPLETE before
-        // stagenet reaches 100000 (~2026-09-25 at 1440 blocks/day from 61372 on
-        // 08-29). A pre-FC4 node spending a post-gate coinbase at depth < 240
-        // would bake history the FC4 binary rejects, forcing a stagenet reset.
+        // had not opened and no coinbase has ever matured under this tier.
+        //
+        // HEIGHT-GATED, not retroactive: maturity is read from the tier at the
+        // COINBASE's height (CheckTxInputs), so every historical spend of a
+        // pre-gate coinbase stays valid and the stagenet history replay
+        // (differential validation) is unaffected.
+        //
+        // ⚠ OPERATIONAL CONSTRAINT — A FLEET REDEPLOY IS REQUIRED, AND TAG v2.3.0
+        // NO LONGER SATISFIES IT. v2.3.0 carries 240 in this tier, so as of this
+        // change it is the OLD binary: it ACCEPTS a post-gate coinbase spent at
+        // depth 240-287 and a node carrying this change rejects it. Every fleet
+        // node must run a binary carrying 288 before stagenet reaches height
+        // 100000 (~2026-09-25 at 1440 blocks/day from 72,864 on 09-07).
+        //
+        // ⚠ THE REACTION WINDOW IS ~288 BLOCKS (~4.8h), NOT THE HEADROOM TO THE
+        // GATE. The split is soft-fork shaped — the new rule is a strict subset of
+        // the old — so if the 240 binaries hold the hashpower majority it is the
+        // UPGRADED nodes that get partitioned. Once the branches are
+        // nMaxReorgDepth apart (the check is >=, so refusal begins AT 288) each
+        // side refuses the other's NEW headers and they can no longer reconcile by
+        // chainwork.
+        //
+        // THE RECOVERY PROCEDURE IS DELIBERATELY NOT HERE. It lives in the
+        // internal fleet deploy runbook, under "Recovery if a node ends up on the
+        // wrong side of the split", where operations reviews it and it can be
+        // corrected without touching consensus source. Two earlier drafts of that
+        // procedure were written in this comment and both were wrong, which is why
+        // it moved. Do not restate it here; update the runbook.
+        //
+        // The consensus facts it rests on are in this tree and are the part worth
+        // citing: the horizon runs at header acceptance only (see the mainnet
+        // tier); a local reorg is not horizon-gated; witness-pruned blocks cannot
+        // be disconnected; and doc/PAT_WITNESS_PRUNING.md §2 and §6 cover those.
+        //
         // The consensus digest absorbs nCoinbaseMaturity per tier, so this
         // change re-pins the digest deliberately (see the pin history in
         // consensus_digest_tests.cpp).
