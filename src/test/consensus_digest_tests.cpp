@@ -719,8 +719,27 @@ BOOST_AUTO_TEST_CASE(consensus_digest_is_pinned)
     // The fleet must run this binary before a coinbase mined at >= 100000 is
     // spent at depth 240-287, or nodes on the old binary and nodes on this one
     // will disagree and split stagenet.
+    //
+    // Moved from a0b1e577... on 2026-09-07 when the stagenet maturity-mirror
+    // tier received the chain's genesis fields (bead
+    // stagenet-mirror-tier-zeroed-genesis-lfll). NOT a rule change on the wire:
+    // the tier had been copied from auxpowConsensus before hashGenesisBlock and
+    // latticeBPSeed were assigned, so GetConsensus(h >= 100000) on stagenet
+    // carried a zero hash and a zero seed, and this pin certified that as
+    // correct. No live validation path reads either field from a height tier
+    // (CheckBlockIndex compares the genesis hash only under -checkblockindex,
+    // regtest-only by default; the seed has no live consumer), so a node with
+    // and a node without this change accept identical blocks.
+    //
+    // The absorbed inputs that move, and only these:
+    //   1. stagenet GetConsensus(1000000).hashGenesisBlock, 0 -> 97df3ae7...
+    //   2. stagenet GetConsensus(1000000).latticeBPSeed, all-zero -> the
+    //      ComputeSoquObscuraSeed value every other stagenet tier already had.
+    // Mainnet, testnet and regtest have no tier copied before their genesis
+    // assignment, and genesis_chainparams_tests now asserts every sampled tier
+    // against the base tier on every network so this cannot recur silently.
     const std::string expected =
-        "a0b1e5777acce071132d36c9bb07ce97f9c7b69b3ed5f13eb9a08f66c9baa00a";
+        "e7ea83dca405f0ca831014af9ddc1022e3f194d8024c0ec2c3ef0dbb6bd7350a";
 
     BOOST_CHECK_MESSAGE(digest.ToString() == expected,
         "consensus digest is " + digest.ToString() + ", expected " + expected +

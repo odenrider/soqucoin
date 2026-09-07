@@ -256,6 +256,43 @@ BOOST_AUTO_TEST_CASE(stagenet_maturity_mirrors_mainnet_from_the_gate_height)
     SelectParams(CBaseChainParams::MAIN);
 }
 
+// Every height-gated tier carries the chain's genesis fields. The tiers are
+// built by copying the previous tier and then overriding a few fields, and the
+// genesis hash and the Lattice-BP++ seed are assigned per tier AFTER the copies,
+// so a tier that is copied early and not listed there silently carries a zero
+// hash and a zero seed. That happened to the stagenet maturity-mirror tier
+// (bead stagenet-mirror-tier-zeroed-genesis-lfll): GetConsensus(h >= 100000)
+// reported hashGenesisBlock == 0, CheckBlockIndex would abort on it under
+// -checkblockindex, and the consensus digest certified the zeroed tier as
+// correct. This case reads the base tier at runtime and compares every sampled
+// tier against it on every network, and also refuses an all-zero base so two
+// zeroed sides cannot agree their way past it.
+BOOST_AUTO_TEST_CASE(every_tier_carries_the_genesis_fields_on_every_network)
+{
+    const std::string nets[] = {CBaseChainParams::MAIN, CBaseChainParams::TESTNET,
+                                CBaseChainParams::STAGENET, CBaseChainParams::REGTEST};
+    // Every tier boundary in chainparams.cpp plus a point far above the last one.
+    const int heights[] = {0, 1, 9, 10, 11, 19, 20, 21, 99, 100, 101, 1000,
+                           99999, 100000, 100001, 1000000};
+    for (const std::string& net : nets) {
+        SelectParams(net);
+        const Consensus::Params& base = Params().GetConsensus(0);
+        BOOST_CHECK_MESSAGE(!base.hashGenesisBlock.IsNull(), net + ": base tier genesis hash is zero");
+        bool seedAllZero = true;
+        for (unsigned char b : base.latticeBPSeed) seedAllZero = seedAllZero && (b == 0);
+        BOOST_CHECK_MESSAGE(!seedAllZero, net + ": base tier latticeBPSeed is all zero");
+        for (int h : heights) {
+            const Consensus::Params& tier = Params().GetConsensus(h);
+            BOOST_CHECK_MESSAGE(tier.hashGenesisBlock == base.hashGenesisBlock,
+                net + ": tier at height " + std::to_string(h) + " carries genesis hash " +
+                tier.hashGenesisBlock.ToString() + ", base tier has " + base.hashGenesisBlock.ToString());
+            BOOST_CHECK_MESSAGE(tier.latticeBPSeed == base.latticeBPSeed,
+                net + ": tier at height " + std::to_string(h) + " carries a different latticeBPSeed");
+        }
+    }
+    SelectParams(CBaseChainParams::MAIN);
+}
+
 // ============================================================================
 // BIP9 Deployment Sanity Tests
 //
