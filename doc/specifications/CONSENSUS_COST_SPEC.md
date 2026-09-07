@@ -454,7 +454,7 @@ Standard Bitcoin witness limits were designed for ECDSA (~72 byte signatures). D
 | **Halving Interval** | 250,000 blocks (~174 days)¹ | Modified (Soqucoin) |
 | **Initial Block Reward** | 100,000 SOQ | Modified (Soqucoin) |
 | **Terminal Reward** | 2,500 SOQ (after block 1,000,000) | Modified (Soqucoin) |
-| **Coinbase Maturity** | 30 blocks | Modified (Soqucoin) |
+| **Coinbase Maturity** | 288 blocks (~4.8h), from height 1 | Modified (Soqucoin) |
 | **Finality Horizon** | 288 blocks (~4.8h), via `nMaxReorgDepth` | Novel (Soqucoin) |
 | **AuxPoW Chain ID** | 0x5351 (21329 decimal) | Novel (Soqucoin) |
 
@@ -652,7 +652,7 @@ All values are defined in the Soqucoin Core source code at the following paths:
 | Proof Bytes per Block | 256 KB | **Consensus** | Novel |
 | Transaction Weight | 800,000 | Policy | Modified (SOQ-ARCH-003) |
 | Script Size | 10,000 bytes | **Consensus** | Inherited |
-| Coinbase Maturity | 30 blocks | **Consensus** | Modified |
+| Coinbase Maturity | 288 blocks (from height 1; 30 at height 0) | **Consensus** | Modified |
 | Min Relay Fee | 0.001 SOQ/kB | Policy | Modified |
 | Dust Limit | 0.01 SOQ | Policy | Modified |
 

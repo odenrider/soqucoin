@@ -73,7 +73,12 @@ func (Soqucoin) ValidTestnetAddress(address string) bool {
 }
 
 func (Soqucoin) MinimumConfirmations() uint {
-        // FINDING-10 FIX: Match actual coinbase maturity of 100 confirmations.
-        // Was incorrectly set to 10, risking reward distribution for orphaned blocks.
-        return uint(100)
+        // Mainnet coinbase maturity, raised 240 -> 288 on 2026-09-07 so that it
+        // covers the finality horizon nMaxReorgDepth (bead
+        // mainnet-maturity-240-not-30-mp5o). The prior value of 100 matched no
+        // network on this chain: mainnet is 288 from height 1, testnet 240,
+        // regtest 60, so 288 is conservative on the others rather than wrong.
+        // No caller in this tool invokes it today; it is part of the Chain
+        // interface (chain.go) and exists so the figure is not silently stale.
+        return uint(288)
 }

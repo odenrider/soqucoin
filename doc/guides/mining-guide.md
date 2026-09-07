@@ -109,7 +109,8 @@ var SoqucoinNetwork = &AuxChain{
         Password:   "your_secure_password",
     },
     BlockReward:    100000,     // Initial block reward
-    ConfirmBlocks:  100,        // Coinbase maturity
+    ConfirmBlocks:  240,        // Coinbase maturity — TESTNET (this block is
+                                // testnet: Port 44555). Mainnet is 288.
 }
 ```
 
@@ -145,7 +146,9 @@ soqucoin-cli getauxblock "blockhash" "auxpow_data"
 
 - **Target**: 60 seconds
 - **Difficulty Adjustment**: DigiShield (every block)
-- **Coinbase Maturity**: 100 blocks
+- **Coinbase Maturity**: network-dependent, and the two differ on purpose.
+  - **Mainnet**: 288 blocks (~4.8 h), equal to the finality horizon `nMaxReorgDepth`, so a coinbase cannot mature inside the window the chain still accepts reorgs in.
+  - **Testnet** (the network this guide is scoped to, see the header): 240 blocks. Testnet is a deliberate exception and is *not* equal to its 288 horizon; it has no height-gated maturity tier, so raising it in place would retroactively invalidate past spends.
 
 ---
 
