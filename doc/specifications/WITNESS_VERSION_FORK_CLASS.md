@@ -92,6 +92,8 @@ The genesis binary makes activation *possible* as a soft fork. The activation re
    output's, stays plaintext, so no conservation rule changes. SOQ conservation holds publicly
    at every pool boundary. Per-output hidden amounts in `nValue` on the base layer cannot be a
    soft fork on any UTXO chain.
+7. **UTXO_COST**, when scheduled, exempts zero-value asset outputs as it already exempts the
+   authority markers. It is dormant in the genesis binary, so any version of it is a tightening.
 8. **Witness layout constraint from `HasDilithiumSignatures`.** The genesis binary rejects any
    non-coinbase transaction whose input witness does not END with a `0x00`-prefixed item, unless
    the `OP_5`-marker exemption applies (which the activation release deletes with the script
@@ -99,8 +101,6 @@ The genesis binary makes activation *possible* as a soft fork. The activation re
    input must end with a `0x00`-prefixed item (for example a `0x00`-prefixed authority set), and
    a pool-spend witness for SoquObscura must end with a `0x00`-prefixed item rather than a bare
    commitment.
-7. **UTXO_COST**, when scheduled, exempts zero-value asset outputs as it already exempts the
-   authority markers. It is dormant in the genesis binary, so any version of it is a tightening.
 
 ## 5. Why the retired rules existed, and what bounds the hazard now
 

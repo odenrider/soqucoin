@@ -46,6 +46,7 @@ int WitnessVersionOf(const CScript& scriptPubKey)
 
 bool IsAttestedVersion(int version, const AttestedSetParams& params)
 {
+    (void)params;   // retained for interface shape; the set no longer depends on it
     switch (version) {
     case 0: case 1: return true;                  // base forms, active from genesis
     // v7/v8 are attested UNCONDITIONALLY (additive-asset genesis door,
