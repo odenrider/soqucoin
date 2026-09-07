@@ -17,9 +17,12 @@
 //     opcodes. Empty set, so the rule could not fire (bead don9).
 //   * bad-txns-usdsoq-conf-input — the identical defect in the authority BURN
 //     input loop, left behind when the output loop was widened (bead n1vf).
-//   * bad-txns-usdsoq-confidential-not-active — reachable in principle but
-//     SHADOWED by SOQ-ARCH-001, which runs earlier in the same ConnectBlock on
-//     the same flags. Pinned below so the shadowing cannot change silently.
+//   * bad-txns-usdsoq-confidential-not-active — until 2026-09 SHADOWED by
+//     SOQ-ARCH-001, a generic all-assets rejection of confidential outputs that
+//     ran earlier in the same ConnectBlock. SOQ-ARCH-001 was retired with the
+//     additive-asset genesis door (rejecting a dormant shape's CREATION made
+//     SoquObscura activation a hard fork), so this asset-specific, USDSOQ-gated
+//     backstop is now the rule that fires. Pinned below.
 //
 // Two things had to exist before any of this could be tested at all, and their
 // absence is why it never was:
@@ -234,14 +237,16 @@ BOOST_AUTO_TEST_CASE(authority_burn_of_transparent_usdsoq_input_is_accepted)
 }
 
 // ---------------------------------------------------------------------------
-// n1vf — THE SHADOWED RULE, PINNED.
-// bad-txns-usdsoq-confidential-not-active is unreachable: SOQ-ARCH-001 runs
-// earlier in the same ConnectBlock, on the same flags, and rejects EVERY
-// confidential output with bad-txns-confidential-not-active. This test does not
-// pretend the asset-specific rule fires; it records WHICH rule does, so the
-// shadowing relationship cannot change without a test changing with it.
+// n1vf — THE FORMERLY SHADOWED RULE, NOW LIVE.
+// With SOQ-ARCH-001 retired (additive-asset genesis door, 2026-09), a v10
+// output created on a chain where USDSOQ is active but SoquObscura is not is
+// rejected by the asset-specific backstop. This rule is gated on USDSOQ being
+// active, so it is a tightening the activation release keeps; the Tier A path
+// stays fail-closed until the privacy layer is live. On a chain where USDSOQ
+// is ALSO dormant (mainnet), a v10 shape is plain anyone-can-spend SOQ and its
+// creation is valid — see witness_version_reservation_tests.
 // ---------------------------------------------------------------------------
-BOOST_AUTO_TEST_CASE(preactivation_v10_output_is_rejected_by_soq_arch_001_not_the_usdsoq_rule)
+BOOST_AUTO_TEST_CASE(preactivation_v10_output_is_rejected_by_the_usdsoq_rule)
 {
     // Deliberately NO ScopedRegtestActivation — this is the shipped dormant state.
     const int h = chainActive.Height() + 1;
@@ -262,11 +267,15 @@ BOOST_AUTO_TEST_CASE(preactivation_v10_output_is_rejected_by_soq_arch_001_not_th
     CTxOut o; o.nValue = val; o.scriptPubKey = Spk(OP_10); tx.vout.push_back(o);
     SignInput(tx, 0, Spk(OP_7), val);
 
+    // USDSOQ is active on regtest, so the USDSOQ-gated backstop is reachable.
+    BOOST_REQUIRE(Consensus::DeploymentActiveAtHeight(h, Params().GetConsensus(h),
+                                                      Consensus::DEPLOYMENT_USDSOQ));
     const std::string why = RejectReasonFor({tx});
-    BOOST_CHECK_EQUAL(why, "bad-txns-confidential-not-active");
-    BOOST_CHECK_MESSAGE(why != "bad-txns-usdsoq-confidential-not-active",
-        "if the asset-specific rule starts firing, SOQ-ARCH-001 has been narrowed and "
-        "the Tier A pre-activation posture must be re-derived, not assumed");
+    BOOST_CHECK_EQUAL(why, "bad-txns-usdsoq-confidential-not-active");
+    BOOST_CHECK_MESSAGE(why != "bad-txns-confidential-not-active",
+        "SOQ-ARCH-001 is back: a generic rejection of dormant confidential shapes makes "
+        "SoquObscura activation a hard fork. Read the additive-asset genesis door design "
+        "before reintroducing it.");
 }
 
 // ---------------------------------------------------------------------------

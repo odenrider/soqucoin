@@ -179,6 +179,7 @@ BITCOIN_TESTS =\
   test/authority_skip_gate_tests.cpp \
   test/witness_prune_tests.cpp \
   test/witness_version_reservation_tests.cpp \
+  test/v6_asset_opcode_ban_tests.cpp \
   test/apo_hashtype_gate_tests.cpp \
   test/dormancy_matrix_tests.cpp \
   test/usdsoq_reorg_tests.cpp \

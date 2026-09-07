@@ -1610,8 +1610,8 @@ bool VerifyScript(const CScript& scriptSig, const CScript& scriptPubKey, const C
     // NOTE: v6 (P2WSH-Dilithium), v7 (USDSOQ holding), v8 (BTCSOQ holding)
     // and v9 (BTCSOQ authority marker) are carved out above.
     // Witness v10 is ALLOCATED: confidential USDSOQ (SOQ-ARCH-004), gated on
-    // DEPLOYMENT_USDSOQ and DEPLOYMENT_SOQUOBSCURA together (validation.cpp
-    // versionActive case 10). It is not a generic future version (bead jzg0).
+    // DEPLOYMENT_USDSOQ and DEPLOYMENT_SOQUOBSCURA together (the compound gate
+    // in the dispatch below). It is not a generic future version (bead jzg0).
     bool is_confidential_usdsoq_witness = (scriptPubKey.size() == 34 &&
                                            scriptPubKey[0] == OP_10 &&
                                            scriptPubKey[1] == 32);
@@ -1694,10 +1694,14 @@ bool VerifyScript(const CScript& scriptSig, const CScript& scriptPubKey, const C
 
     // Dormant witness versions (v4-v10 allocated, v11-v16 unallocated):
     // spends are anyone-can-spend at the script layer until each version's
-    // deployment activates. This window cannot be funded: creating an output
-    // of an inactive witness version is consensus-rejected in ConnectBlock
-    // (SOQ-I009, bad-txns-witness-version-not-active), and standardness
-    // (policy/policy.cpp) keeps such transactions out of the mempool.
+    // deployment activates. That is BIP141's posture and it is what makes each
+    // activation a soft fork: the activation only ADDS the requirement that the
+    // spend verify. Outputs of a dormant version are consensus-valid to create
+    // (ConnectBlock reserves only v2, whose spend path binds nothing) but
+    // NON-STANDARD (policy/policy.cpp gates v2-v16 on the live activation
+    // mask), and no wallet path can construct one, so the anyone-can-spend
+    // window is reachable only by raw construction plus a miner running
+    // modified policy, with only the constructor's own funds at risk.
     if (is_latticebp_witness) {
         if (!(flags & SCRIPT_VERIFY_SOQUOBSCURA)) {
             return set_success(serror);  // Not active yet — anyone-can-spend
@@ -1813,6 +1817,35 @@ bool VerifyScript(const CScript& scriptSig, const CScript& scriptPubKey, const C
 
         // Deserialize the witnessScript
         CScript witnessScript(witnessScriptBytes.begin(), witnessScriptBytes.end());
+
+        // Asset and attestation opcodes are dispatched by WITNESS VERSION (v2,
+        // v3, v4, v5 above), never from inside a script, and a v6 script may
+        // not contain one. This is UNCONDITIONAL — not gated on the asset
+        // deployments — because EvalScript answers BAD_OPCODE for these while
+        // their flag is clear and executes them once it is set. Reachable from
+        // a v6 script, that is a rule that FAILS before an asset activation and
+        // SUCCEEDS after it, i.e. a loosening, which would make every asset
+        // activation that follows P2WSH-Dilithium a hard fork. Rejecting the
+        // opcode's presence in every state is a rule the activation release
+        // keeps, so it stays a soft fork. Scanned with GetOp so bytes inside
+        // pushes are not mistaken for opcodes; a script that fails to parse is
+        // rejected here rather than half-executed.
+        {
+            CScript::const_iterator pc = witnessScript.begin();
+            opcodetype op;
+            std::vector<unsigned char> pushIgnored;
+            while (pc < witnessScript.end()) {
+                if (!witnessScript.GetOp(pc, op, pushIgnored)) {
+                    return set_error(serror, SCRIPT_ERR_BAD_OPCODE);
+                }
+                if (op == OP_USDSOQ_MINT || op == OP_USDSOQ_BURN ||
+                    op == OP_USDSOQ_FREEZE || op == OP_USDSOQ_ROTATE ||
+                    op == OP_SOQUOBSCURA_RANGEPROOF || op == OP_CHECKFOLDPROOF ||
+                    op == OP_CHECKPATAGG) {
+                    return set_error(serror, SCRIPT_ERR_BAD_OPCODE);
+                }
+            }
+        }
 
         // Execute the witnessScript via EvalScript.
         // SECURITY NOTE: The witnessScript is used as the scriptCode for sighash

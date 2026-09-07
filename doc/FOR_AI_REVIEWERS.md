@@ -44,20 +44,26 @@ Layer 2: script flags. There is no named helper for this; the
 src/validation.cpp:3351 (`unsigned int flags = ...`), one guarded block per
 deployment.
 
-Layer 3: output-creation reservation. Dormant witness versions are
-anyone-can-spend at the script layer, which is the standard soft-fork
-posture (the interpreter returns success for inactive versions, for example
-src/script/interpreter.cpp:1689 and its siblings). But that window cannot
-be funded: `ConnectBlock` consensus-rejects the CREATION of any output
-whose witness version is not active
-(`bad-txns-witness-version-not-active`, src/validation.cpp:3737, the
-SOQ-I009 fix; the versionActive lambda beginning near validation.cpp:3703)
-and rejects any confidential output while SoquObscura is dormant
-(`bad-txns-confidential-not-active`, src/validation.cpp:3663,
-SOQ-ARCH-001).
+Layer 3: relay refusal and the no-wallet-path fact. Dormant witness
+versions are anyone-can-spend at the script layer, which is the standard
+soft-fork posture (the interpreter returns success for inactive versions,
+for example src/script/interpreter.cpp `VerifyScript` and its siblings), and
+outputs of a dormant version are consensus-valid to create. That is
+deliberate: a creation rejection the activation release would have to relax
+is a hard fork, and until 2026-09 the genesis candidate carried exactly that
+(SOQ-I009, SOQ-ARCH-001; retired, record in
+doc/specifications/WITNESS_VERSION_FORK_CLASS.md). What bounds the window is that
+such outputs are NON-STANDARD until their deployment is active
+(src/policy/policy.cpp `IsStandard`, mask from `AcceptToMemoryPoolWorker`)
+and that no wallet or RPC path can construct a non-v1 address
+(src/utiladdress.cpp `DecodeDestination`). Only witness v2 (PAT) is
+consensus-unfundable, because its spend path binds nothing.
 
 If your scan reports "witness v5+ returns set_success, anyone can spend",
-you have read layer 2 without layer 3. Both readings are needed.
+you have read layer 2 without layer 3. Both readings are needed, and the
+finding you may be looking for is a CONSENSUS rule keyed on an asset shape
+that would have to be relaxed at activation — that is the hard-fork class,
+and the fork-class document lists every such site and its disposition.
 
 ## 3. Mainnet activation matrix at genesis
 

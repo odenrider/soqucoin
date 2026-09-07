@@ -105,13 +105,16 @@ There is no BIP9 miner-signaling activation.
 > (retired, can never activate), v4 = SoquObscura confidential, v5 = USDSOQ authority,
 > v6 = P2WSH-Dilithium, v7 = USDSOQ holding, v8/v9 = BTCSOQ, v10 = confidential USDSOQ,
 > v11-v16 = unallocated. Each handler pushes the witness stack into `EvalScript()` with the
-> corresponding opcode. Flag gating ensures soft fork safety, and creating an output of a
-> dormant witness version is consensus-rejected in ConnectBlock (SOQ-I009,
-> `bad-txns-witness-version-not-active`).
+> corresponding opcode. Flag gating ensures soft fork safety. Creating an output of any witness
+> version except v2 is consensus-valid at every height; v2 (PAT) is permanently unfundable
+> because its spend path binds nothing (`bad-txns-witness-version-not-active`).
 >
 > **Dormant features**: When the enforcement flag is not set, transactions using that witness version
-> pass as anyone-can-spend (standard BIP141 behavior). This allows future activation at a published
-> flag-day height without a hard fork.
+> pass as anyone-can-spend (standard BIP141 behavior), and outputs of that version are non-standard
+> so they do not relay. Activation only adds the requirement that the spend verify, so activation
+> at a published flag-day height is a soft fork. See `doc/specifications/WITNESS_VERSION_FORK_CLASS.md`
+> for the per-version fork-class record and the additive asset-rule design the asset deployments
+> (USDSOQ, BTCSOQ, SoquObscura) must follow to stay soft forks.
 
 ### LatticeFold+ Performance (ALWAYS_ACTIVE from Genesis)
 
@@ -502,12 +505,16 @@ constituency, and the real activation precondition (audit clearance) is what a h
 
 > [!IMPORTANT]
 > **Pre-activation behavior**: spends of dormant witness versions evaluate as anyone-can-spend
-> per BIP141 at the script layer, but this window cannot be funded: ConnectBlock
-> consensus-rejects the CREATION of any output whose witness version is not active
-> (SOQ-I009, `bad-txns-witness-version-not-active`) and any confidential output while
-> SoquObscura is dormant (SOQ-ARCH-001, `bad-txns-confidential-not-active`). Standardness
-> additionally keeps such transactions out of the mempool. Setting the activation height in
-> a released binary enables full consensus enforcement without a hard fork.
+> per BIP141 at the script layer, and outputs of a dormant version are consensus-valid to
+> create but non-standard, so they do not relay and no wallet path constructs them. This is
+> what makes a flag-day activation a soft fork: the released binary only ADDS the requirement
+> that the spend verify. Until 2026-09 the genesis candidate reserved every dormant version at
+> consensus (SOQ-I009) and rejected confidential outputs while SoquObscura was dormant
+> (SOQ-ARCH-001); both closed a fund-and-sweep hazard at the price of turning every
+> activation into a hard fork, and both were retired (`doc/specifications/WITNESS_VERSION_FORK_CLASS.md`).
+> Only v2 (PAT) remains consensus-unfundable, because its spend path binds nothing.
+> For the asset deployments the creation gate was not the only hard-fork-shaped rule: their
+> value rules must also be additive (same document, §3).
 
 ### Genesis Features (ALWAYS_ACTIVE)
 
@@ -560,7 +567,7 @@ Witness v6 → P2WSH-Dilithium script hash                             [NOT_SCHE
 Witness v7 → USDSOQ holding                                          [NOT_SCHEDULED on mainnet]
 Witness v8/v9 → BTCSOQ holding / authority marker                    [NOT_SCHEDULED on mainnet]
 Witness v10 → Confidential USDSOQ (requires USDSOQ + SOQUOBSCURA)    [NOT_SCHEDULED]
-Witness v11-v16 → Unallocated: output creation consensus-rejected (SOQ-I009)
+Witness v11-v16 → Unallocated: anyone-can-spend, non-standard, creatable (BIP141 posture)
 ```
 
 Each handler pushes the witness stack into `EvalScript()` with the corresponding opcode. Flag gating

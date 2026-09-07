@@ -127,7 +127,7 @@ const Row TABLE[] = {
     {  8, "is_btcsoq_holding",      SCRIPT_VERIFY_BTCSOQ,             true,         true  },
     {  9, "is_btcsoq_authority",    SCRIPT_VERIFY_BTCSOQ,             true,         true  },
     // v10 is ALLOCATED (confidential USDSOQ) with a COMPOUND gate: both
-    // deployments must be active (bead jzg0; validation versionActive case 10).
+    // deployments must be active (bead jzg0; interpreter.cpp is_confidential_usdsoq_witness).
     { 10, "is_confidential_usdsoq_witness",
           SCRIPT_VERIFY_USDSOQ | SCRIPT_VERIFY_SOQUOBSCURA,           true,         false },
     { 11, "is_future_witness",      0,                                true,         false },
@@ -342,7 +342,7 @@ BOOST_AUTO_TEST_CASE(free_witness_versions_are_v11_through_v16)
     const std::vector<int> expected = {11, 12, 13, 14, 15, 16};
     BOOST_CHECK_MESSAGE(free_ == expected,
         "the free witness-version range has moved. v10 is TAKEN (confidential USDSOQ, Tier A) "
-        "in every layer: transaction.h, validation.cpp versionActive, and since FC4 the "
+        "in every layer: transaction.h, the activation mask in validation.cpp, and since FC4 the "
         "interpreter's own is_confidential_usdsoq_witness dispatch (bead jzg0 closed the "
         "half-allocation). Derive this list from the code before allocating anything, never "
         "from a design document");
