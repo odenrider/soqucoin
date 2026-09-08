@@ -101,8 +101,10 @@ def scan_script(script):
 
 def selftest():
     fails = []
+    count = [0]
 
     def check(name, got, want):
+        count[0] += 1
         if got != want:
             fails.append(f"{name}: got {got!r}, want {want!r}")
 
@@ -136,7 +138,7 @@ def selftest():
     if fails:
         print("SELFTEST FAIL\n  " + "\n  ".join(fails))
         return 1
-    print(f"SELFTEST OK ({22} checks)")
+    print(f"SELFTEST OK ({count[0]} checks)")
     return 0
 
 
@@ -222,6 +224,8 @@ def main():
     info = rpc.call([("getblockchaininfo", [])])[0]
     tip_h, tip_hash = info["blocks"], info["bestblockhash"]
     h_to = tip_h if args.h_to is None else min(args.h_to, tip_h)
+    if args.h_from > h_to:
+        sys.exit(f"empty range: --from {args.h_from} is above --to/tip {h_to}; nothing scanned, no verdict")
     if args.h_from > 0:
         sys.stderr.write("NOTE: --from > 0 only sees v6 outputs CREATED at or after --from; "
                          "spends of earlier v6 outputs are not classified. Use a full run for the gate.\n")
@@ -232,7 +236,7 @@ def main():
     spent = {}            # version -> count of spends seen (v2..v16 only, from progs)
     cb_outputs = {}       # version -> coinbase output count ("nonprogram" for the rest)
     v6 = {"spends": 0, "ok": 0, "banned": 0, "parse_fail": 0, "hash_mismatch": 0, "short_stack": 0}
-    hits_t1, hits_t2, txs_total = [], [], 0
+    hits_t1, hits_t2, anomalies, txs_total = [], [], [], 0
     t0 = time.time()
 
     for start in range(args.h_from, h_to + 1, args.batch):
@@ -240,7 +244,8 @@ def main():
         hashes = rpc.call([("getblockhash", [h]) for h in heights])
         blocks = rpc.call([("getblock", [hh, 2]) for hh in hashes])
         for h, blk in zip(heights, blocks):
-            assert blk["height"] == h, (h, blk["height"])
+            if blk["height"] != h:
+                raise RuntimeError(f"batch ordering broken: asked for height {h}, got {blk['height']}")
             for tx in blk["tx"]:
                 txs_total += 1
                 is_cb = "coinbase" in tx["vin"][0]
@@ -271,9 +276,12 @@ def main():
                     v6["spends"] += 1
                     status, detail = classify_v6(vin.get("txinwitness", []), program)
                     v6[status] += 1
-                    if status != "ok":
-                        hits_t1.append({"height": h, "txid": tx["txid"], "prevout": f"{key[0]}:{key[1]}",
-                                        "status": status, "detail": detail})
+                    rec = {"height": h, "txid": tx["txid"], "prevout": f"{key[0]}:{key[1]}",
+                           "status": status, "detail": detail}
+                    if status in ("banned", "parse_fail"):
+                        hits_t1.append(rec)          # the tightening: accepted then, rejected now
+                    elif status != "ok":
+                        anomalies.append(rec)        # rejected before #83 too: scanner or RPC defect
         done = heights[-1] - args.h_from + 1
         if (heights[-1] + 1) % 5000 == 0 or heights[-1] == h_to:
             rate = done / max(time.time() - t0, 1e-9)
@@ -294,22 +302,37 @@ def main():
         "T1_v6_witnessScript": v6,
         "T1_hits": hits_t1,
         "T2_coinbase_v10_hits": hits_t2,
-        "positive_controls": {
-            "v6_spends_all_decoded": v6["spends"] == v6["ok"] + v6["banned"] + v6["parse_fail"]
-                                     + v6["hash_mismatch"] + v6["short_stack"],
-            "v6_outputs_created": created.get(6, 0),
-            "v7_outputs_created_nonzero": created.get(7, 0) > 0,
-            "coinbase_v0_or_v1_seen": (cb_outputs.get(0, 0) + cb_outputs.get(1, 0)) > 0,
-        },
-        "verdict": "PASS" if not hits_t1 and not hits_t2 else "FAIL - do not deploy, re-decide",
-        "elapsed_s": round(time.time() - t0, 1),
+        "instrument_anomalies": anomalies,
     }
+    # The instrument must prove it saw the chain before its zero counts mean
+    # anything: a v6 spend actually decoded, the version classifier saw the v7
+    # outputs USDSOQ has on stagenet, and coinbases parsed as witness programs.
+    # A hash mismatch or short stack on an ACCEPTED v6 spend cannot be a
+    # tightening (both were rejected before #83), so it is a scanner or RPC
+    # defect and also blocks the verdict.
+    controls = {
+        "v6_spends_seen_nonzero": v6["spends"] > 0,
+        "v6_outputs_created": created.get(6, 0),
+        "v7_outputs_created_nonzero": created.get(7, 0) > 0,
+        "coinbase_v0_or_v1_seen": (cb_outputs.get(0, 0) + cb_outputs.get(1, 0)) > 0,
+        "no_instrument_anomalies": not anomalies,
+    }
+    result["positive_controls"] = controls
+    instrument_ok = all(v for v in controls.values() if isinstance(v, bool))
+    if hits_t1 or hits_t2:
+        verdict, code = "FAIL - tightening hit in history; do not deploy, re-decide", 2
+    elif not instrument_ok:
+        verdict, code = "FAIL - instrument not proven; zero hits mean nothing", 3
+    else:
+        verdict, code = "PASS", 0
+    result["verdict"] = verdict
+    result["elapsed_s"] = round(time.time() - t0, 1)
     text = json.dumps(result, indent=2)
     print(text)
     if args.out:
         with open(args.out, "w") as f:
             f.write(text + "\n")
-    return 0 if result["verdict"] == "PASS" else 2
+    return code
 
 
 if __name__ == "__main__":
