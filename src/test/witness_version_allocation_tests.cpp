@@ -46,7 +46,9 @@
 
 #include <boost/test/unit_test.hpp>
 
+#include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 BOOST_FIXTURE_TEST_SUITE(witness_version_allocation_tests, BasicTestingSetup)
@@ -523,6 +525,127 @@ BOOST_AUTO_TEST_CASE(retired_v3_is_still_soft_fork_safe_not_burned)
     BOOST_CHECK_MESSAGE(!StandardWith(Program(3), WitnessVersionBit(3)),
         "witness v3 must never be relay-standard, even with its mask bit forced on. That is "
         "the only thing standing between anyone-can-spend and a funded v3 output");
+}
+
+// ⛔ THE ATTACK THIS PINS: someone schedules the v6 covenant stack the way
+// DEPLOYMENT_PRECONDITIONS.md rule 3 reads at a glance — one feature at a time
+// — and ships DEPLOYMENT_P2WSH_DILITHIUM + DEPLOYMENT_DILITHIUM_KEYHASH at
+// height H1 and DEPLOYMENT_APO at H2 > H1. Between H1 and H2 every node
+// rejects a v6 spend carrying an ANYPREVOUT signature; at H2 the upgraded
+// nodes accept it and every node still on the H1 release forks off. That is a
+// HARD FORK produced by a one-line chainparams edit, and until this test
+// existed nothing in the tree observed it.
+//
+// TWO mechanisms produce it, and the deployments are not interchangeable.
+// (Line numbers are deliberately omitted: they drifted within a single editing
+// session. Find each handler by its opcode in EvalScript.)
+//
+// 1. STACK ARITY, inside a v6 script:
+//
+//   OP_CSFS            set: pops 3, pushes 1.   clear: NOP.
+//   OP_CDKH            set: pops 3.             clear: NOP7.
+//   V6_CONTROLFLOW     set: OP_DROP/OP_EQUAL/OP_SHA256/OP_CLTV/OP_CSV execute.
+//                      clear: silently ignored. The v6 dispatch chain has NO
+//                      terminal else->BAD_OPCODE, so an unmatched opcode is a
+//                      no-op rather than a failure.
+//   OP_CTV             set: validates and leaves its hash on the stack.
+//                      clear: NOP. ARITY-NEUTRAL, the only one of the four.
+//
+//   For the eLTOO shape <khB> OP_CDKH <khA> OP_CDKH OP_1 satisfied by
+//   [sigA, pkA, sigB, pkB]: with CDKH clear nothing is popped, seven items
+//   remain, and the clean-stack check in VerifyScript's P2WSH-Dilithium branch
+//   REJECTS. With CDKH set the stack reduces to [1] and it ACCEPTS.
+//
+// 2. SIGHASH ACCEPTANCE, for DEPLOYMENT_APO. APO is a sighash type, not an
+//    opcode, and changes no stack depth. Its loosening is the SIG_HASHTYPE
+//    rejection inside OP_CHECKDILITHIUMKEYHASH turning into an acceptance.
+//
+// DEPLOYMENT_P2WSH_DILITHIUM is neither: it is the version gate, the baseline
+// the other four are measured against. Rejected-then-accepted is a loosening
+// however it is scheduled; flag-day activation does not change fork class,
+// only direction does.
+//
+// Measured against the GENESIS binary the combined activation is still a soft
+// fork, because a dormant v6 output is anyone-can-spend. So the whole stack in
+// one flag-day is safe and any split of it is not.
+//
+// See doc/specifications/WITNESS_VERSION_FORK_CLASS.md §3a and the v6 row of
+// §2, doc/DEPLOYMENT_PRECONDITIONS.md rule 3's exception, and bead mpu9.
+BOOST_AUTO_TEST_CASE(v6_covenant_stack_activates_together)
+{
+    const std::pair<Consensus::DeploymentPos, const char*> kStack[] = {
+        {Consensus::DEPLOYMENT_P2WSH_DILITHIUM, "DEPLOYMENT_P2WSH_DILITHIUM"},
+        {Consensus::DEPLOYMENT_DILITHIUM_KEYHASH, "DEPLOYMENT_DILITHIUM_KEYHASH"},
+        {Consensus::DEPLOYMENT_CSFS, "DEPLOYMENT_CSFS"},
+        {Consensus::DEPLOYMENT_V6_CONTROLFLOW, "DEPLOYMENT_V6_CONTROLFLOW"},
+        {Consensus::DEPLOYMENT_APO, "DEPLOYMENT_APO"},
+        // CTV is arity-neutral and could in principle follow later. It is held
+        // to the same height anyway so the rule has no edge case to remember.
+        {Consensus::DEPLOYMENT_CTV, "DEPLOYMENT_CTV"},
+    };
+
+    // ⛔ EVERY TIER, NOT JUST THE ONE COVERING HEIGHT 0. Each network builds a
+    // height-indexed tier tree and GetConsensus(h) returns whichever tier
+    // covers h; stagenet's maturityMirrorConsensus tier (height >= 100,000) is
+    // the tier stagenet is about to enter. An edit applied to one tier is
+    // invisible to the others, which is the hazard CRegTestParams::
+    // UpdateActivationHeight in chainparams.cpp warns about in the same words.
+    // Reading only GetConsensus(0) let a per-tier split pass this test.
+    const int kProbeHeights[] = {0, 1, 9, 10, 19, 20, 144999, 145000,
+                                 371336, 371337, 99999, 100000, 100001, 1000000};
+
+    for (const std::string& net : {CBaseChainParams::MAIN, CBaseChainParams::TESTNET,
+                                   CBaseChainParams::REGTEST, CBaseChainParams::STAGENET}) {
+        SelectParams(net);
+
+        std::set<const Consensus::Params*> tiers;
+        for (int probe : kProbeHeights) tiers.insert(&Params().GetConsensus(probe));
+
+        // Positive control: the probe must actually reach more than one tier,
+        // or "checked every tier" is a claim about a single struct. Every
+        // network in this loop builds at least two.
+        BOOST_CHECK_MESSAGE(
+            tiers.size() >= 2,
+            net + ": the height probe reached only " + std::to_string(tiers.size()) +
+            " consensus tier(s). This test asserts the flag-day invariant on EVERY "
+            "tier, so if the tier layout changed, kProbeHeights must change with it. "
+            "A single-tier result means the per-tier check is not running");
+
+        for (const Consensus::Params* tier : tiers) {
+        const Consensus::Params& params = *tier;
+
+        const int32_t anchor = params.vDeployments[kStack[0].first].nActivationHeight;
+        for (const auto& d : kStack) {
+            const int32_t h = params.vDeployments[d.first].nActivationHeight;
+            BOOST_CHECK_MESSAGE(
+                h == anchor,
+                net + " (tier effective from height " +
+                std::to_string(params.nHeightEffective) + "): " + d.second +
+                " is scheduled at height " + std::to_string(h) +
+                " but " + kStack[0].second + " is at " + std::to_string(anchor) +
+                ". The witness-v6 covenant stack MUST activate in ONE flag-day. "
+                "Splitting it is a HARD FORK: these opcodes change stack arity "
+                "between their clear and set states, so a v6 script that fails the "
+                "clean-stack check while one of them is dormant PASSES once it "
+                "activates, which splits every node on the intermediate release. "
+                "APO splits it by a different mechanism, sighash acceptance rather "
+                "than arity, and is in the same flag-day for that reason. "
+                "See WITNESS_VERSION_FORK_CLASS.md 3a and bead mpu9. If you are "
+                "scheduling the flag-day, move ALL of these to the same height, "
+                "IN EVERY TIER of this network's consensus tree");
+
+            // NO_HEIGHT_ACTIVATION defers to the BIP9 state machine, whose
+            // per-deployment timing is not a single flag-day by construction.
+            BOOST_CHECK_MESSAGE(
+                params.vDeployments[d.first].nActivationHeight !=
+                    Consensus::BIP9Deployment::NO_HEIGHT_ACTIVATION,
+                net + ": " + d.second + " must not use NO_HEIGHT_ACTIVATION. The v6 "
+                "covenant stack activates by height, together; the BIP9 state machine "
+                "would let its members cross the threshold independently");
+        }
+        }
+    }
+    SelectParams(CBaseChainParams::MAIN);
 }
 
 BOOST_AUTO_TEST_SUITE_END()
