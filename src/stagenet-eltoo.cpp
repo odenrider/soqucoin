@@ -753,7 +753,7 @@ int main(int argc, char* argv[])
     // ==================================================================
     // Step 5: PRE-FLIGHT — Build+sign BOTH U and C before broadcasting
     // ==================================================================
-    // This is the crash-safe ordering ratified in review: if we crash after
+    // This is the crash-safe ordering settled in review: if we crash after
     // funding but before broadcasting, we still have both signed txs.
     // The ephemeral keys are only in memory; losing them means the 2-of-2
     // funds are unrecoverable. So we sign everything first.
