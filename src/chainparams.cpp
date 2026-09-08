@@ -1358,7 +1358,7 @@ public:
         consensus.nBTCSOQAuthorityEnforcementHeight = 0;
 
         // SOQ-I005-STAGENET: Authority signature enforcement height.
-        // RECALIBRATED 2026-07-04 (Casey-ratified) for the reset stagenet chain:
+        // RECALIBRATED 2026-07-04 (ratified) for the reset stagenet chain:
         // the old 37201 was calibrated for the pre-reset chain's CLI test mints
         // and, on the reset chain, ALSO silently no-opped freeze/unfreeze
         // registry application in ConnectBlock until ~block 37201.

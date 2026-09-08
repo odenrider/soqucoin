@@ -11,7 +11,7 @@
 // =============================================================================
 //
 // ⛔ MODEL STATUS: PROPOSED, NOT RATIFIED. This is decision gate D2 and it is
-// OPEN. An earlier revision of this header said "Casey-decided 2026-08-16";
+// OPEN. An earlier revision of this header claimed a ratification dated 2026-08-16;
 // no such ratification is recorded in any design document, and the companion
 // review (DL-SOQUOBSCURA-ISSUER-KEY-REVIEW.md) states on its own first page
 // that it reviews a *proposal* and is "an analytical device, not a record of

@@ -13,7 +13,7 @@
 // WHAT THIS IS, AND WHY IT IS NOT ViewKeyData
 //
 // The ratified Tier A compliance rule (DL-LATTICEBP-STATE-ANALYSIS-2026-07-18
-// section II.3, Casey-ratified 2026-07-19) requires that every confidential
+// section II.3, ratified 2026-07-19) requires that every confidential
 // USDSOQ output carry the amount and blinding encrypted to the issuer's view
 // key, together with an in-band proof, verified by consensus, that the
 // ciphertext encrypts exactly the committed value. Consensus rejects a
