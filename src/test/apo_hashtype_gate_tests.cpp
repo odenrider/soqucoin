@@ -75,14 +75,49 @@ struct ApoGateSetup : public DilithiumChainSetup {
 
 BOOST_FIXTURE_TEST_SUITE(apo_hashtype_gate_tests, ApoGateSetup)
 
-// Reachability control first: regtest activates APO at height 0, so an
-// APO-signed spend must connect. Without this the rejections below could be
-// caused by anything.
-BOOST_AUTO_TEST_CASE(apo_signature_connects_while_deployment_active)
+// THE TRAP THIS PINS (bead mpu9, ruled 2026-09-08). Until 2026-09-08 this case
+// asserted the OPPOSITE — that an APO-signed v1 spend CONNECTS while
+// DEPLOYMENT_APO is active. That behaviour is what made activating APO a HARD
+// FORK: v1 is active from genesis, so the genesis binary rejects this spend,
+// and a release that accepts it accepts a block the genesis binary rejects.
+// Flag-day scheduling does not change that; only direction does.
+//
+// The rejection on the single-key path is now UNCONDITIONAL. APO reaches the
+// chain only inside witness v6, through OP_CHECKDILITHIUMKEYHASH, which is
+// NOP-when-clear and therefore soft-fork activatable (covenant_tests,
+// dilithium_keyhash_committed_tests, keyhash_broadcast_tests,
+// lightning_script_tests cover that path; eLTOO channel outputs are v6, see
+// src/stagenet-eltoo.cpp MakeV6Spk).
+//
+// Regtest activates APO at height 0, so this runs with the deployment ACTIVE.
+// That is the point: the flag must not be able to open this path.
+BOOST_AUTO_TEST_CASE(apo_rejected_on_single_key_path_even_when_deployment_active)
 {
-    CMutableTransaction tx = SpendWithHashType(coinbaseTxns[0], SIGHASH_ANYPREVOUT);
+    const int h = chainActive.Height() + 1;
+    BOOST_REQUIRE_MESSAGE(Consensus::DeploymentActiveAtHeight(
+        h, Params().GetConsensus(h), Consensus::DEPLOYMENT_APO),
+        "regtest must have DEPLOYMENT_APO active, or this proves nothing");
+
+    CMutableTransaction apo = SpendWithHashType(coinbaseTxns[0], SIGHASH_ANYPREVOUT);
+    BOOST_CHECK_MESSAGE(!BlockIsValid({apo}),
+        "SIGHASH_ANYPREVOUT was honoured on the v1 single-key path with "
+        "DEPLOYMENT_APO ACTIVE — the flag can still open a path the genesis "
+        "binary rejects, which is a hard fork (bead mpu9)");
+
+    CMutableTransaction apoas = SpendWithHashType(coinbaseTxns[4], SIGHASH_ANYPREVOUTANYSCRIPT);
+    BOOST_CHECK_MESSAGE(!BlockIsValid({apoas}),
+        "SIGHASH_ANYPREVOUTANYSCRIPT was honoured on the v1 single-key path "
+        "with DEPLOYMENT_APO ACTIVE");
+}
+
+// Positive control for the case above: with APO ACTIVE, the same harness and
+// the same key produce a spend that CONNECTS when the hashtype is ordinary. So
+// the rejections above are about the hashtype, not about a broken fixture.
+BOOST_AUTO_TEST_CASE(single_key_path_still_spends_with_an_ordinary_hashtype)
+{
+    CMutableTransaction tx = SpendWithHashType(coinbaseTxns[5], SIGHASH_ALL);
     BOOST_CHECK_MESSAGE(BlockIsValid({tx}),
-        "SIGHASH_ANYPREVOUT must work while DEPLOYMENT_APO is active");
+        "ordinary SIGHASH_ALL spending broke — the APO rejection is too wide");
 }
 
 // The gate. Same transaction, deployment withdrawn (mainnet's posture).
