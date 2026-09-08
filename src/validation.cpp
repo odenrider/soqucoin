@@ -596,18 +596,49 @@ bool CheckTransaction(const CTransaction& tx, CValidationState& state, bool fChe
         }
 
         // Coinbase outputs must be native SOQ — cannot mint USDSOQ via mining.
+        // The v5 authority marker is forbidden in a coinbase for the same
+        // reason the v9 marker is (see the BTCSOQ rule below): with witness-
+        // version creation no longer consensus-reserved, a coinbase-born v5
+        // UTXO costs the miner nothing and would sit in the UTXO set as a
+        // candidate prevout for the bootstrap fallback in ConnectBlock, which
+        // accepts ANY v5 prevout as the authority input while the tracked
+        // outpoint is null. This is a partial control, not a complete one: an
+        // ordinary transaction can still create a v5 output by paying its own
+        // SOQ into it, and neither marker ban changes that. Both paths are
+        // inert without the authority keyset (a bootstrap still verifies M-of-N
+        // ML-DSA against the configured keys), and the residual is tracked
+        // separately: pin the bootstrap fallback to ComputeAuthorityKeyHash.
+        //
+        // ⚠️ SCOPE OF THIS BAN, corrected 2026-09-08 after review. On mainnet,
+        // testnet and stagenet a miner ALREADY cannot produce such a coinbase:
+        // ContextualCheckBlock rejects any coinbase output that is not
+        // OP_1 <32> or OP_RETURN with bad-cb-output-type, on every network
+        // except regtest, at every height above 0. That rule predates every
+        // block of the current stagenet chain, so no coinbase asset output has
+        // ever been valid there. This ban is therefore DEFENCE IN DEPTH on the
+        // real networks, and on REGTEST it is the only such rule. Do not
+        // describe it as closing a reachable miner path; the earlier version of
+        // this comment did, and it was wrong.
+        //
+        // It is still worth having. It rejects at CheckTransaction rather than
+        // at ContextualCheckBlock, so it holds if the output-type rule is ever
+        // relaxed, and it makes the v5 case explicit next to the v9 one.
+        //
         // Unconditional on purpose: a rejection the genesis binary carries is
-        // one every later release keeps, and this one is load-bearing for the
-        // additive asset design (see above).
-        if (tx.IsCoinBase() && hasUSDSOQ) {
+        // one every later release keeps.
+        if (tx.IsCoinBase() && (hasUSDSOQ || hasUSDSOQAuthority)) {
             return state.DoS(100, false, REJECT_INVALID, "bad-cb-usdsoq-asset");
         }
 
         // DL-BTCSOQ-CONSENSUS-NATIVE: same rule for BTCSOQ (v8), and the v9
-        // authority marker is also forbidden in a coinbase — a coinbase-born
-        // marker UTXO could otherwise serve as a bootstrap-fallback prevout.
-        // (Unlike USDSOQ, BTCSOQ has no legacy chain, so this is strict from
-        // genesis on every network.)
+        // authority marker is also forbidden in a coinbase. NOT for the reason
+        // the v5 ban above exists: BTCSOQ's bootstrap pins
+        // nAuthorityInputIndex = 0 (see the BTCSOQ block in ConnectBlock) and
+        // never scans inputs for a v9 prevout, so a coinbase-born v9 marker is
+        // inert, unlike a v5 one. This ban is a tightening in its own right,
+        // kept because a free miner-only asset-shaped UTXO has no legitimate
+        // use. (Unlike USDSOQ, BTCSOQ has no legacy chain, so this is strict
+        // from genesis on every network.)
         if (tx.IsCoinBase() && (hasBTCSOQ || hasBTCSOQAuthority)) {
             return state.DoS(100, false, REJECT_INVALID, "bad-cb-btcsoq-asset");
         }
@@ -7175,9 +7206,6 @@ std::vector<unsigned char> GenerateCoinbaseCommitment(CBlock& block, const CBloc
     // producer/validator drift.
     // =========================================================================
     if (pcoinsTip != nullptr && block.vtx.size() > 1) {
-        const int nHeight = pindexPrev == nullptr ? 0 : pindexPrev->nHeight + 1;
-        const Consensus::Params& patConsensus = Params().GetConsensus(nHeight);
-
         // The attested set is fixed and height-independent (see
         // IsAttestedVersion), so the miner and ConnectBlock cannot disagree.
         const patattest::AttestedSetParams patParams;
