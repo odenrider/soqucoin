@@ -225,12 +225,28 @@ def is_apo_base(base):
 
 
 def collection_controls(hits, v6, cb_outputs, t3):
-    """Cross-checks tying each hit list to an independently maintained count.
+    """Cross-checks tying each hit list to a separately maintained count.
 
     SCAN_TESTS guards the verdict side of the wiring. These guard the
-    collection side. Every counter used here is incremented BEFORE, and
-    independently of, the condition that appends to the hit list, so breaking
-    the match condition or removing the append makes the pair disagree.
+    collection side: every counter is incremented on a different line from the
+    condition that appends, so REMOVING AN APPEND makes the pair disagree.
+
+    ⛔ THREE OF THE FOUR ALSO CATCH A BROKEN MATCH CONDITION. T1 DOES NOT.
+    T2, T2b and T3 count something computed BEFORE their match runs -- the
+    output's witness version, and the decoded hashtype -- so breaking
+    COINBASE_BANNED_VERSIONS or APO_BASE_TYPES moves the hit list and leaves
+    the counter behind. T1's counter is v6[status], and `status` IS the
+    classification its append condition reads, so dropping an entry from BANNED
+    makes the spend classify "ok" and BOTH sides fall to zero, on a chain that
+    CONTAINS the hit. Measured: deleting OP_USDSOQ_BURN, OP_USDSOQ_ROTATE or
+    OP_CHECKFOLDPROOF from BANNED left every control here true and the verdict
+    PASS on a v6 spend carrying that opcode.
+
+    An earlier version of this docstring said breaking a match condition made
+    the pair disagree, without qualification. It is three of four, and T1 is
+    the exception, so T1's match condition rests on guard 1 alone. That is why
+    selftest pins BANNED's contents against a literal AND drives every entry
+    through scan_script.
     """
     return {
         # v6[status] is incremented for every classified v6 spend; T1 collects
@@ -394,6 +410,25 @@ def selftest():
     check("sighash_single is not apo", is_apo_base(0x03), False)
     check("apo base set is exactly the two BIP 118 types",
           sorted(APO_BASE_TYPES), [0x41, 0x42])
+    # T1's table needs the same pin, and needs it MORE than the other two:
+    # its collection control cannot catch a dropped entry (see
+    # collection_controls), so this is the only guard it has. Measured before
+    # this check existed: deleting 0xF5, 0xF7 or 0xFC from BANNED left
+    # SELFTEST OK (69 checks), exit 0, and a v6 spend carrying that opcode
+    # scanned as "ok" with every collection control true and verdict PASS.
+    # ⚠️ SCOPE: this pins BANNED against a literal in this file. It catches a
+    # deletion or a typo here; it does NOT couple to interpreter.cpp. Keeping
+    # the two lists in step is an allocation-time human step, recorded in
+    # doc/specifications/WITNESS_VERSION_FORK_CLASS.md.
+    check("banned opcode set is exactly interpreter.cpp's v6 ban list",
+          [hex(op) for op in sorted(BANNED)],
+          ["0xf4", "0xf5", "0xf6", "0xf7", "0xfa", "0xfc", "0xfd"])
+    # The literal above is what catches a deletion. This loop is DERIVED from
+    # BANNED and therefore cannot, but it proves every entry is reachable
+    # through the GetOp walk rather than merely present in the dict.
+    for op, name in sorted(BANNED.items()):
+        check(f"scan_script detects {name} in a v6 witnessScript",
+              scan_script(bytes([0x51, op])), ("banned", name))
 
     # F1 round 3, part 2: the collection side of the wiring. Breaking a detector's
     # match condition or its append leaves the verdict side untouched, so these
