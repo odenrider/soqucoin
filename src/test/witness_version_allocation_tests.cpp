@@ -46,7 +46,9 @@
 
 #include <boost/test/unit_test.hpp>
 
+#include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 BOOST_FIXTURE_TEST_SUITE(witness_version_allocation_tests, BasicTestingSetup)
@@ -453,29 +455,101 @@ BOOST_AUTO_TEST_CASE(witness_v0_is_standard_but_unspendable)
 // symptom. Correct order of work: seed PublicParams from consensus.
 // latticeBPSeed, make Check 4 bind against a verifier-derived value, then
 // Check 5, then re-run the forgery battery, then consider a height.
+namespace {
+
+//! Every distinct consensus tier the selected network exposes.
+//!
+//! ⛔ Params().GetConsensus(h) returns the tier covering h, NOT the network.
+//! Each network assembles a height-indexed tree of Consensus::Params, so a test
+//! that reads GetConsensus(0) asserts its invariant on ONE struct and a
+//! divergence confined to any other tier passes it. CRegTestParams::
+//! UpdateActivationHeight in chainparams.cpp warns about the same hazard for
+//! WRITES; it applies identically to reads.
+std::set<const Consensus::Params*> AllConsensusTiers()
+{
+    // Spans every tier boundary in use: regtest (10, 20), stagenet's maturity
+    // mirror (100000), mainnet's digishield and auxpow tiers (145000, 371337).
+    static const int kProbeHeights[] = {0, 1, 9, 10, 19, 20, 99999, 100000,
+                                        100001, 144999, 145000, 371336, 371337,
+                                        1000000};
+    std::set<const Consensus::Params*> tiers;
+    for (int h : kProbeHeights) tiers.insert(&Params().GetConsensus(h));
+    return tiers;
+}
+
+//! Tier count per network, pinned so that adding a tier, or shrinking the probe
+//! list, FAILS instead of silently narrowing every per-tier assertion above.
+//! A `>= 2` control does not do this: it stays green while the tier that
+//! matters goes unchecked.
+size_t ExpectedTierCount(const std::string& net)
+{
+    if (net == CBaseChainParams::MAIN)    return 2;
+    if (net == CBaseChainParams::TESTNET) return 2;
+    if (net == CBaseChainParams::REGTEST) return 3;
+    return 4;   // stagenet: base, two rate tiers, and the maturity mirror
+}
+
+//! Assert a deployment holds nActivationHeight on EVERY tier of the selected
+//! network, and that the probe actually reached all of them.
+void CheckDeploymentOnEveryTier(const std::string& net,
+                                Consensus::DeploymentPos d,
+                                const char* name,
+                                int32_t expected,
+                                const std::string& why)
+{
+    const std::set<const Consensus::Params*> tiers = AllConsensusTiers();
+    BOOST_CHECK_MESSAGE(
+        tiers.size() == ExpectedTierCount(net),
+        net + ": the height probe reached " + std::to_string(tiers.size()) +
+        " consensus tier(s), expected " + std::to_string(ExpectedTierCount(net)) +
+        ". The tier layout changed, so kProbeHeights and ExpectedTierCount must "
+        "change with it. Until they do, every per-tier assertion in this file is "
+        "checking fewer tiers than it claims");
+    for (const Consensus::Params* tier : tiers) {
+        BOOST_CHECK_MESSAGE(
+            tier->vDeployments[d].nActivationHeight == expected,
+            net + " (tier effective from height " +
+            std::to_string(tier->nHeightEffective) + "): " + name +
+            " is at height " +
+            std::to_string(tier->vDeployments[d].nActivationHeight) +
+            ", expected " + std::to_string(expected) + ". " + why);
+    }
+}
+
+} // namespace
+
 BOOST_AUTO_TEST_CASE(soquobscura_must_stay_dormant_on_every_network)
 {
     for (const std::string& net : {CBaseChainParams::MAIN, CBaseChainParams::TESTNET,
                                    CBaseChainParams::REGTEST, CBaseChainParams::STAGENET}) {
         SelectParams(net);
-        const Consensus::BIP9Deployment& d =
-            Params().GetConsensus(0).vDeployments[Consensus::DEPLOYMENT_SOQUOBSCURA];
 
-        BOOST_CHECK_MESSAGE(
-            d.nActivationHeight == Consensus::BIP9Deployment::NOT_SCHEDULED,
-            net + ": DEPLOYMENT_SOQUOBSCURA has left NOT_SCHEDULED. The Lattice-BP++ range "
-            "proof does not bind the committed amount (see this test's comment and bead "
+        // EVERY tier, not only the one covering height 0: a dormancy assertion
+        // that reads one tier is passed by an edit to any other, and stagenet's
+        // maturity mirror tier is the one the chain is about to enter.
+        CheckDeploymentOnEveryTier(
+            net, Consensus::DEPLOYMENT_SOQUOBSCURA, "DEPLOYMENT_SOQUOBSCURA",
+            Consensus::BIP9Deployment::NOT_SCHEDULED,
+            "It has left NOT_SCHEDULED. The Lattice-BP++ range proof does not bind "
+            "the committed amount (see this test's comment and bead "
             "soquobscura-verifier-epic-roadmap-y58a). Activating it makes confidential "
             "outputs mintable from nothing. Do not schedule a height until the forgery "
             "battery in soquobscura_degenerate_witness_tests.cpp passes for the right "
             "reason");
 
         // NO_HEIGHT_ACTIVATION would fall back to the BIP9 state machine, which is
-        // exactly how a "cleanup" could re-activate this by accident.
-        BOOST_CHECK_MESSAGE(
-            d.nActivationHeight != Consensus::BIP9Deployment::NO_HEIGHT_ACTIVATION,
-            net + ": DEPLOYMENT_SOQUOBSCURA must not use NO_HEIGHT_ACTIVATION. That "
-            "sentinel defers to VersionBitsState and would re-open the feature");
+        // exactly how a "cleanup" could re-activate this by accident. NOT_SCHEDULED
+        // is INT_MAX and NO_HEIGHT_ACTIVATION is -1, so the check above already
+        // excludes it; this states the intent for anyone editing the expected value.
+        for (const Consensus::Params* tier : AllConsensusTiers()) {
+            BOOST_CHECK_MESSAGE(
+                tier->vDeployments[Consensus::DEPLOYMENT_SOQUOBSCURA].nActivationHeight
+                    != Consensus::BIP9Deployment::NO_HEIGHT_ACTIVATION,
+                net + " (tier effective from height " +
+                std::to_string(tier->nHeightEffective) + "): DEPLOYMENT_SOQUOBSCURA "
+                "must not use NO_HEIGHT_ACTIVATION. That sentinel defers to "
+                "VersionBitsState and would re-open the feature");
+        }
     }
     SelectParams(CBaseChainParams::MAIN);
 }
@@ -485,6 +559,27 @@ BOOST_AUTO_TEST_CASE(latticefold_is_retired_and_cannot_activate_on_any_network)
     for (const std::string& net : {CBaseChainParams::MAIN, CBaseChainParams::TESTNET,
                                    CBaseChainParams::REGTEST, CBaseChainParams::STAGENET}) {
         SelectParams(net);
+
+        // EVERY tier: see AllConsensusTiers. The nActivationHeight assertion below
+        // uses the shared helper; nStartTime/nTimeout are checked per tier here.
+        CheckDeploymentOnEveryTier(
+            net, Consensus::DEPLOYMENT_LATTICEFOLD, "DEPLOYMENT_LATTICEFOLD",
+            Consensus::BIP9Deployment::NO_HEIGHT_ACTIVATION,
+            "It has an nActivationHeight, which nothing reads for this deployment. "
+            "Either the query site moved to DeploymentActiveAtHeight, or someone set "
+            "a field expecting it to lock the feature down");
+
+        for (const Consensus::Params* tier : AllConsensusTiers()) {
+            const Consensus::BIP9Deployment& t =
+                tier->vDeployments[Consensus::DEPLOYMENT_LATTICEFOLD];
+            BOOST_CHECK_MESSAGE(t.nStartTime == 0 && t.nTimeout == 0,
+                net + " (tier effective from height " +
+                std::to_string(tier->nHeightEffective) + "): DEPLOYMENT_LATTICEFOLD "
+                "must stay at nStartTime=0/nTimeout=0. It is RETIRED and superseded by "
+                "SoquObscura, and its verifier accepts an all-zero witness, so "
+                "activating it on any network is a forgery path");
+        }
+
         const Consensus::BIP9Deployment& d =
             Params().GetConsensus(0).vDeployments[Consensus::DEPLOYMENT_LATTICEFOLD];
 
@@ -523,6 +618,123 @@ BOOST_AUTO_TEST_CASE(retired_v3_is_still_soft_fork_safe_not_burned)
     BOOST_CHECK_MESSAGE(!StandardWith(Program(3), WitnessVersionBit(3)),
         "witness v3 must never be relay-standard, even with its mask bit forced on. That is "
         "the only thing standing between anyone-can-spend and a funded v3 output");
+}
+
+// ⛔ THE ATTACK THIS PINS: someone schedules the v6 covenant stack the way
+// DEPLOYMENT_PRECONDITIONS.md rule 3 reads at a glance — one feature at a time
+// — and ships DEPLOYMENT_P2WSH_DILITHIUM + DEPLOYMENT_DILITHIUM_KEYHASH at
+// height H1 and DEPLOYMENT_APO at H2 > H1. Between H1 and H2 every node
+// rejects a v6 spend carrying an ANYPREVOUT signature; at H2 the upgraded
+// nodes accept it and every node still on the H1 release forks off. That is a
+// HARD FORK produced by a one-line chainparams edit, and until this test
+// existed nothing in the tree observed it.
+//
+// TWO mechanisms produce it, and the deployments are not interchangeable.
+// (Line numbers are deliberately omitted: they drifted within a single editing
+// session. Find each handler by its opcode in EvalScript.)
+//
+// 1. STACK ARITY, inside a v6 script:
+//
+//   OP_CSFS            set: pops 3, pushes NOTHING. clear: NOP.
+//                      ⚠️ OP_CHECKSIGFROMSTACK and OP_CHECKSIGFROMSTACKVERIFY
+//                      are BOTH OP_NOP5 (script.h), so the handler's
+//                      `opcode == OP_CHECKSIGFROMSTACKVERIFY` test is always
+//                      true and the push branch is dead. The live semantics
+//                      are VERIFY: net -3, not -2.
+//   OP_CDKH            set: pops 3.             clear: NOP7.
+//   V6_CONTROLFLOW     set: OP_DROP/OP_EQUAL/OP_SHA256/OP_CLTV/OP_CSV execute.
+//                      clear: silently ignored. The v6 dispatch chain has NO
+//                      terminal else->BAD_OPCODE, so an unmatched opcode is a
+//                      no-op rather than a failure.
+//   OP_CTV             set: validates and leaves its hash on the stack.
+//                      clear: NOP. ARITY-NEUTRAL, the only one of the four.
+//
+//   For the eLTOO shape <khB> OP_CDKH <khA> OP_CDKH OP_1 satisfied by
+//   [sigA, pkA, sigB, pkB]: with CDKH clear nothing is popped, seven items
+//   remain, and the clean-stack check in VerifyScript's P2WSH-Dilithium branch
+//   REJECTS. With CDKH set the stack reduces to [1] and it ACCEPTS.
+//
+// 2. SIGHASH ACCEPTANCE, for DEPLOYMENT_APO. APO is a sighash type, not an
+//    opcode, and changes no stack depth. Its loosening is the SIG_HASHTYPE
+//    rejection inside OP_CHECKDILITHIUMKEYHASH turning into an acceptance.
+//
+// DEPLOYMENT_P2WSH_DILITHIUM is neither: it is the version gate, the baseline
+// the other four are measured against. Rejected-then-accepted is a loosening
+// however it is scheduled; flag-day activation does not change fork class,
+// only direction does.
+//
+// Measured against the GENESIS binary the combined activation is still a soft
+// fork, because a dormant v6 output is anyone-can-spend. So the whole stack in
+// one flag-day is safe and any split of it is not.
+//
+// See doc/specifications/WITNESS_VERSION_FORK_CLASS.md §3a and the v6 row of
+// §3, doc/DEPLOYMENT_PRECONDITIONS.md rule 3's exception, and bead mpu9.
+BOOST_AUTO_TEST_CASE(v6_covenant_stack_activates_together)
+{
+    const std::pair<Consensus::DeploymentPos, const char*> kStack[] = {
+        {Consensus::DEPLOYMENT_P2WSH_DILITHIUM, "DEPLOYMENT_P2WSH_DILITHIUM"},
+        {Consensus::DEPLOYMENT_DILITHIUM_KEYHASH, "DEPLOYMENT_DILITHIUM_KEYHASH"},
+        {Consensus::DEPLOYMENT_CSFS, "DEPLOYMENT_CSFS"},
+        {Consensus::DEPLOYMENT_V6_CONTROLFLOW, "DEPLOYMENT_V6_CONTROLFLOW"},
+        {Consensus::DEPLOYMENT_APO, "DEPLOYMENT_APO"},
+        // CTV is arity-neutral and could in principle follow later. It is held
+        // to the same height anyway so the rule has no edge case to remember.
+        {Consensus::DEPLOYMENT_CTV, "DEPLOYMENT_CTV"},
+    };
+
+    // ⛔ EVERY TIER, NOT JUST THE ONE COVERING HEIGHT 0. See AllConsensusTiers.
+    for (const std::string& net : {CBaseChainParams::MAIN, CBaseChainParams::TESTNET,
+                                   CBaseChainParams::REGTEST, CBaseChainParams::STAGENET}) {
+        SelectParams(net);
+
+        const std::set<const Consensus::Params*> tiers = AllConsensusTiers();
+
+        // Positive control: the probe must reach EVERY tier this network has,
+        // not merely more than one. A `>= 2` control stays green while the tier
+        // that matters goes unchecked, which is how a per-tier split hides.
+        BOOST_CHECK_MESSAGE(
+            tiers.size() == ExpectedTierCount(net),
+            net + ": the height probe reached " + std::to_string(tiers.size()) +
+            " consensus tier(s), expected " + std::to_string(ExpectedTierCount(net)) +
+            ". The tier layout changed. Update kProbeHeights and "
+            "ExpectedTierCount together, or this invariant is checking fewer "
+            "tiers than it claims");
+
+        for (const Consensus::Params* tier : tiers) {
+        const Consensus::Params& params = *tier;
+
+        const int32_t anchor = params.vDeployments[kStack[0].first].nActivationHeight;
+        for (const auto& d : kStack) {
+            const int32_t h = params.vDeployments[d.first].nActivationHeight;
+            BOOST_CHECK_MESSAGE(
+                h == anchor,
+                net + " (tier effective from height " +
+                std::to_string(params.nHeightEffective) + "): " + d.second +
+                " is scheduled at height " + std::to_string(h) +
+                " but " + kStack[0].second + " is at " + std::to_string(anchor) +
+                ". The witness-v6 covenant stack MUST activate in ONE flag-day. "
+                "Splitting it is a HARD FORK: these opcodes change stack arity "
+                "between their clear and set states, so a v6 script that fails the "
+                "clean-stack check while one of them is dormant PASSES once it "
+                "activates, which splits every node on the intermediate release. "
+                "APO splits it by a different mechanism, sighash acceptance rather "
+                "than arity, and is in the same flag-day for that reason. "
+                "See WITNESS_VERSION_FORK_CLASS.md 3a and bead mpu9. If you are "
+                "scheduling the flag-day, move ALL of these to the same height, "
+                "IN EVERY TIER of this network's consensus tree");
+
+            // NO_HEIGHT_ACTIVATION defers to the BIP9 state machine, whose
+            // per-deployment timing is not a single flag-day by construction.
+            BOOST_CHECK_MESSAGE(
+                params.vDeployments[d.first].nActivationHeight !=
+                    Consensus::BIP9Deployment::NO_HEIGHT_ACTIVATION,
+                net + ": " + d.second + " must not use NO_HEIGHT_ACTIVATION. The v6 "
+                "covenant stack activates by height, together; the BIP9 state machine "
+                "would let its members cross the threshold independently");
+        }
+        }
+    }
+    SelectParams(CBaseChainParams::MAIN);
 }
 
 BOOST_AUTO_TEST_SUITE_END()
