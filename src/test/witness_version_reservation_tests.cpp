@@ -340,21 +340,46 @@ BOOST_AUTO_TEST_CASE(asset_holdings_cannot_hold_value_before_activation)
     }
 }
 
-// Coinbase path: CheckTransaction bans asset holdings and the BTCSOQ marker in
-// a coinbase, unconditionally. A coinbase is the one transaction the
+// Coinbase path: CheckTransaction bans asset holdings and BOTH authority
+// markers in a coinbase, unconditionally. A coinbase is the one transaction the
 // conservation rule does not see, so without these bans a miner could create a
 // valued asset-shaped output while the deployment is dormant. v10 is covered
 // by the same ban as v7 (IsAnyUSDSOQ), which is the part this PR added.
+//
+// THE ATTACK THIS PINS: a miner mines a coinbase paying to a v5 (USDSOQ
+// authority) or v9 (BTCSOQ authority) marker while the deployment is dormant.
+// It costs nothing — a coinbase spends no inputs. The two markers are NOT
+// symmetric in what that buys the miner:
+//
+//   v5 (USDSOQ) is the reachable one. The bootstrap fallback selects THE
+//   authority input by SHAPE — the first input whose prevout is OP_5 <32>,
+//   while the tracked outpoint is null (validation.cpp:4105) — and takes the
+//   attacker-chosen prevout as the authorityScriptCode. A free coinbase-born
+//   marker is therefore a candidate authority input the moment USDSOQ
+//   activates.
+//
+//   v9 (BTCSOQ) is not. Its bootstrap pins nAuthorityInputIndex = 0
+//   (validation.cpp:4927) and never scans inputs for a v9 prevout, so a
+//   planted v9 marker UTXO is inert. Its ban is a tightening in its own
+//   right, not a fix for this attack. Do not restate it as one.
+//
+// v9 was banned when BTCSOQ landed; v5 was not, and before the additive-asset
+// genesis door it did not matter, because creating a v5 output at all was
+// consensus-reserved while USDSOQ was dormant. The door removed that
+// reservation, so the ban has to carry the weight.
 BOOST_AUTO_TEST_CASE(coinbase_cannot_create_asset_shapes)
 {
     ScopedRegtestWithdrawal offU(Consensus::DEPLOYMENT_USDSOQ, 0);
     ScopedRegtestWithdrawal offB(Consensus::DEPLOYMENT_BTCSOQ, 0);
     BOOST_CHECK_EQUAL(CoinbaseRejectReason(Spk(OP_7)),  "bad-cb-usdsoq-asset");
     BOOST_CHECK_EQUAL(CoinbaseRejectReason(Spk(OP_10)), "bad-cb-usdsoq-asset");
+    BOOST_CHECK_EQUAL(CoinbaseRejectReason(Spk(OP_5)),  "bad-cb-usdsoq-asset");
     BOOST_CHECK_EQUAL(CoinbaseRejectReason(Spk(OP_8)),  "bad-cb-btcsoq-asset");
     BOOST_CHECK_EQUAL(CoinbaseRejectReason(Spk(OP_9)),  "bad-cb-btcsoq-asset");
-    // Control: the ban is about asset shapes, not about non-v1 coinbases.
+    // Control: the ban is about asset shapes and markers, not about non-v1
+    // coinbases. v6 is a live, non-asset witness version and must stay legal.
     BOOST_CHECK_EQUAL(CoinbaseRejectReason(Spk(OP_1)), "");
+    BOOST_CHECK_EQUAL(CoinbaseRejectReason(Spk(OP_6)), "");
 }
 
 // ---------------------------------------------------------------------------
