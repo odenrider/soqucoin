@@ -38,6 +38,24 @@ feature that satisfies its own row and violates one of these is **not** ready.
    batch-activate. `NOT_SCHEDULED` stays until the relevant Halborn Phase 2 scope
    signs off on that specific feature.
 
+   ⛔ **ONE EXCEPTION, AND IT IS MANDATORY, NOT PERMISSIVE: the witness-v6
+   covenant stack.** `DEPLOYMENT_P2WSH_DILITHIUM`, `DEPLOYMENT_DILITHIUM_KEYHASH`,
+   `DEPLOYMENT_CSFS`, `DEPLOYMENT_V6_CONTROLFLOW` and `DEPLOYMENT_APO` MUST
+   activate at the SAME height, in one flag-day. Splitting them is not a
+   conservative choice here, it is a hard fork: each of those opcodes changes the
+   stack depth between its clear and set states, so a v6 script that fails the
+   clean-stack check while one of them is dormant PASSES once it activates. That
+   is a loosening measured against the intermediate release, and it splits every
+   node running it. Measured against the genesis binary the combined activation
+   is a soft fork, because a dormant v6 output is anyone-can-spend.
+   `DEPLOYMENT_CTV` is the one member of the stack that is
+   genuinely arity-neutral and could follow later; it is included in the
+   flag-day anyway so that the rule has no edge case to remember. Audit scope
+   must therefore clear for the WHOLE stack before any of it is scheduled.
+   Rationale and the per-opcode arity trace:
+   `doc/specifications/WITNESS_VERSION_FORK_CLASS.md` §3a and the v6 row of §2.
+   Pinned by `witness_version_allocation_tests::v6_covenant_stack_activates_together`.
+
 4. **Relay policy must move in lockstep with consensus, never ahead of it.** A
    gated witness version is anyone-can-spend until its deployment activates. If
    relay policy also calls it standard, the pair is not a safe failure, it is a
@@ -239,8 +257,13 @@ BIP 119 `OP_CHECKTEMPLATEVERIFY`, BIP 118 `SIGHASH_ANYPREVOUT`, BIP 348
 2. ☐ APO specifically: the hashtype gate must be pinned
    (`apo_hashtype_gate_tests.cpp`), since ANYPREVOUT changes what a signature
    commits to.
-3. ☐ These three are commonly activated together for eLTOO. That is still three
-   separate decisions under rule 3 above.
+3. ☐ These three are commonly activated together for eLTOO. Under the v6
+   covenant-stack exception to rule 3 they are not three separate scheduling
+   decisions: CSFS and APO activate in the same flag-day as
+   `DEPLOYMENT_P2WSH_DILITHIUM`, `DEPLOYMENT_DILITHIUM_KEYHASH` and
+   `DEPLOYMENT_V6_CONTROLFLOW`, because a later activation of any of them is a
+   loosening. They remain three separate AUDIT decisions, and the flag-day
+   cannot be scheduled until all of them clear.
 
 ### `DEPLOYMENT_P2WSH_DILITHIUM` (bit 10)
 Witness v6: P2WSH with Dilithium. Covenant script execution and L2SOQ Lightning.

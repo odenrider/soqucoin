@@ -47,6 +47,7 @@
 #include <boost/test/unit_test.hpp>
 
 #include <string>
+#include <utility>
 #include <vector>
 
 BOOST_FIXTURE_TEST_SUITE(witness_version_allocation_tests, BasicTestingSetup)
@@ -523,6 +524,86 @@ BOOST_AUTO_TEST_CASE(retired_v3_is_still_soft_fork_safe_not_burned)
     BOOST_CHECK_MESSAGE(!StandardWith(Program(3), WitnessVersionBit(3)),
         "witness v3 must never be relay-standard, even with its mask bit forced on. That is "
         "the only thing standing between anyone-can-spend and a funded v3 output");
+}
+
+// ⛔ THE ATTACK THIS PINS: someone schedules the v6 covenant stack the way
+// DEPLOYMENT_PRECONDITIONS.md rule 3 reads at a glance — one feature at a time
+// — and ships DEPLOYMENT_P2WSH_DILITHIUM + DEPLOYMENT_DILITHIUM_KEYHASH at
+// height H1 and DEPLOYMENT_APO at H2 > H1. Between H1 and H2 every node
+// rejects a v6 spend carrying an ANYPREVOUT signature; at H2 the upgraded
+// nodes accept it and every node still on the H1 release forks off. That is a
+// HARD FORK produced by a one-line chainparams edit, and until this test
+// existed nothing in the tree observed it.
+//
+// The mechanism is stack arity, not APO specifically. Inside a v6 script:
+//
+//   OP_CTV             (interpreter.cpp:628)  set: validates, leaves its hash
+//                                             on the stack. clear: NOP.
+//                                             ARITY-NEUTRAL — the only one.
+//   OP_CSFS            (interpreter.cpp:689)  set: pops 3, pushes 1. clear: NOP.
+//   OP_CDKH            (interpreter.cpp:786)  set: pops 3. clear: NOP7.
+//   V6_CONTROLFLOW     (interpreter.cpp:857)  set: OP_DROP/OP_EQUAL/OP_SHA256/
+//                                             OP_CLTV/OP_CSV execute. clear:
+//                                             silently ignored, no terminal
+//                                             BAD_OPCODE.
+//
+// So for the eLTOO shape <khB> OP_CDKH <khA> OP_CDKH OP_1 satisfied by
+// [sigA, pkA, sigB, pkB]: with CDKH clear nothing is popped, seven items
+// remain, and the clean-stack check at interpreter.cpp:1893 REJECTS. With CDKH
+// set the stack reduces to [1] and it ACCEPTS. Rejected-then-accepted is a
+// loosening however it is scheduled; flag-day activation does not change fork
+// class, only direction does.
+//
+// Measured against the GENESIS binary the combined activation is still a soft
+// fork, because a dormant v6 output is anyone-can-spend. So the whole stack in
+// one flag-day is safe and any split of it is not.
+//
+// See doc/specifications/WITNESS_VERSION_FORK_CLASS.md §3a and the v6 row of
+// §2, doc/DEPLOYMENT_PRECONDITIONS.md rule 3's exception, and bead mpu9.
+BOOST_AUTO_TEST_CASE(v6_covenant_stack_activates_together)
+{
+    const std::pair<Consensus::DeploymentPos, const char*> kStack[] = {
+        {Consensus::DEPLOYMENT_P2WSH_DILITHIUM, "DEPLOYMENT_P2WSH_DILITHIUM"},
+        {Consensus::DEPLOYMENT_DILITHIUM_KEYHASH, "DEPLOYMENT_DILITHIUM_KEYHASH"},
+        {Consensus::DEPLOYMENT_CSFS, "DEPLOYMENT_CSFS"},
+        {Consensus::DEPLOYMENT_V6_CONTROLFLOW, "DEPLOYMENT_V6_CONTROLFLOW"},
+        {Consensus::DEPLOYMENT_APO, "DEPLOYMENT_APO"},
+        // CTV is arity-neutral and could in principle follow later. It is held
+        // to the same height anyway so the rule has no edge case to remember.
+        {Consensus::DEPLOYMENT_CTV, "DEPLOYMENT_CTV"},
+    };
+
+    for (const std::string& net : {CBaseChainParams::MAIN, CBaseChainParams::TESTNET,
+                                   CBaseChainParams::REGTEST, CBaseChainParams::STAGENET}) {
+        SelectParams(net);
+        const Consensus::Params& params = Params().GetConsensus(0);
+
+        const int32_t anchor = params.vDeployments[kStack[0].first].nActivationHeight;
+        for (const auto& d : kStack) {
+            const int32_t h = params.vDeployments[d.first].nActivationHeight;
+            BOOST_CHECK_MESSAGE(
+                h == anchor,
+                net + ": " + d.second + " is scheduled at height " + std::to_string(h) +
+                " but " + kStack[0].second + " is at " + std::to_string(anchor) +
+                ". The witness-v6 covenant stack MUST activate in ONE flag-day. "
+                "Splitting it is a HARD FORK: these opcodes change stack arity "
+                "between their clear and set states, so a v6 script that fails the "
+                "clean-stack check while one of them is dormant PASSES once it "
+                "activates, which splits every node on the intermediate release. "
+                "See WITNESS_VERSION_FORK_CLASS.md 3a and bead mpu9. If you are "
+                "scheduling the flag-day, move ALL of these to the same height");
+
+            // NO_HEIGHT_ACTIVATION defers to the BIP9 state machine, whose
+            // per-deployment timing is not a single flag-day by construction.
+            BOOST_CHECK_MESSAGE(
+                params.vDeployments[d.first].nActivationHeight !=
+                    Consensus::BIP9Deployment::NO_HEIGHT_ACTIVATION,
+                net + ": " + d.second + " must not use NO_HEIGHT_ACTIVATION. The v6 "
+                "covenant stack activates by height, together; the BIP9 state machine "
+                "would let its members cross the threshold independently");
+        }
+    }
+    SelectParams(CBaseChainParams::MAIN);
 }
 
 BOOST_AUTO_TEST_SUITE_END()

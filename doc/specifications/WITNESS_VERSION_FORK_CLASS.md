@@ -28,7 +28,7 @@ switches from reject to accept at activation is a hard fork however it is gated.
 | `bad-*-authority-not-active`: authority-shaped tx rejected while the asset deployment is dormant | `CheckInputs` | same (the activation release accepts the shape) | replaced by fall-through to ordinary per-input script verification |
 | Undo mirrors for asset supply, authority outpoint, freeze registry and key images | `DisconnectBlock` | state corruption, not fork class: reversed ops ConnectBlock never applied | gated on the deployment exactly as ConnectBlock is |
 | Asset/attestation opcodes inside a v6 script: `BAD_OPCODE` while the asset flag is clear, executed once set | `interpreter.cpp` v6 path | rejection relaxed at asset activation → hard fork for every asset activation after P2WSH-Dilithium | made unconditionally invalid inside v6 (opcodes are dispatched by witness version, never by script) |
-| Coinbase asset bans (`bad-cb-usdsoq-asset`, `bad-cb-btcsoq-asset`) and dual-marker ban | `CheckTransaction` | rejections every release keeps | **kept**, coinbase USDSOQ ban extended to v10 |
+| Coinbase asset bans (`bad-cb-usdsoq-asset`, `bad-cb-btcsoq-asset`) and dual-marker ban | `CheckTransaction` | rejections every release keeps | **kept**, coinbase USDSOQ ban extended to v10 and to the v5 authority marker (2026-09-08), matching the v9 ban; §4.4 authority transactions are ordinary transactions that spend a marker, never coinbases, so this is a rejection every activation release keeps |
 | `HasDilithiumSignatures` (`bad-txns-requires-dilithium`): the LAST witness item of every non-coinbase input must begin `0x00`, with a whole-tx exemption when an `OP_5` output plus an authority-shaped witness is present | `CheckTransaction` via `primitives/transaction.cpp` | the check is a rejection every release keeps; the exemption is applied by the genesis binary (dropping it later only tightens) | **kept**; constrains every future witness layout (§4.8) |
 | PAT attested set: v7/v8 two-item spends joined the set only when their deployment was active | `consensus/pat_attestation.cpp`, `ConnectBlock` commitment check | commitment became a function of activation state → genesis and upgraded nodes reject each other's commitments = **hard fork** | set fixed at v0/v1/v7/v8 for every height |
 | Mempool marker-spend mirrors (`bad-*-marker-spend`) | `AcceptToMemoryPoolWorker` | policy, not fork class, but DoS(100) on a consensus-valid spend of a dormant marker | gated on the deployment like their ConnectBlock twins |
@@ -51,14 +51,42 @@ program nor the sighash.
 | v3 | LatticeFold (retired) | soft, if ever revived with a sound verifier | creatable, anyone-can-spend |
 | v4 | SoquObscura pool (confidential SOQ) | **soft**, provided the activation release follows §4 (shielded-pool value model) | |
 | v5 / v7 | USDSOQ authority / holding | **soft**, provided the activation release follows §4 | |
-| v6 | P2WSH-Dilithium | **soft** | spend binds `SHA256(witnessScript)` to the program and the sighash inside the script; the covenant opcodes (CTV, CSFS, CDKH, V6_CONTROLFLOW) are NOP-when-clear inside v6 scripts and can activate with it or after it |
+| v6 | P2WSH-Dilithium | **soft**, provided the activation release follows §3a | spend binds `SHA256(witnessScript)` to the program and the sighash inside the script. ⛔ The covenant opcodes are NOT interchangeable here: only CTV is arity-neutral with its flag clear (`interpreter.cpp:628`, validates and leaves its hash on the stack when set, NOP when clear) and may therefore activate after v6. CSFS (`:689`, pops 3 pushes 1 when set, NOP when clear), CDKH (`:786`, pops 3 when set, NOP7 when clear) and V6_CONTROLFLOW (`:857`, its opcodes are silently ignored when clear) each change the stack depth between states, so a script that fails the clean-stack check while they are dormant passes once they activate. A later activation of any of the three is a LOOSENING, by the same mechanism as APO in §3a, and they activate in the SAME flag-day as v6 |
 | v8 / v9 | BTCSOQ holding / authority | **soft**, provided the activation release follows §4 | |
 | v10 | confidential USDSOQ | **soft**, provided the activation release follows §4 | the USDSOQ-gated backstop `bad-txns-usdsoq-confidential-not-active` stays: it is a tightening |
 | v11–v16 | unallocated | soft for any future version whose rules are additive | allocation-time review applies §1 |
 
-Out of scope here and tracked separately: `DEPLOYMENT_APO` gates SIGHASH_ANYPREVOUT at consensus
-on the v1/v7/v8 path, so its activation is a rejection relaxed = hard fork; the additive fix is
-to reject those hashtypes on v1/v7/v8 permanently and reach APO only inside v6 scripts.
+### 3a. APO / eLTOO, and the activation-sequencing rule (bead mpu9, ruled 2026-09-08)
+
+D1 found that `DEPLOYMENT_APO` gated SIGHASH_ANYPREVOUT at consensus on the v1/v7/v8 single-key
+path, so activating it would relax a rejection = hard fork. Option (a) was ruled and is
+implemented:
+
+* **The single-key path (v0/v1, and the v7/v8 holding shapes) rejects APO hashtypes
+  UNCONDITIONALLY** (`interpreter.cpp`, `IsAPOSigHashType` at the VerifyScript call site). v1 is
+  active from genesis, so the genesis binary rejects those spends and every later release must
+  keep rejecting them. `DEPLOYMENT_APO` can no longer open this path, so the trap cannot be
+  sprung by scheduling a height.
+* **APO reaches the chain only inside witness v6**, through `OP_CHECKDILITHIUMKEYHASH`, whose
+  handler keeps the `SCRIPT_VERIFY_APO` gate. That is safe because OP_CDKH is NOP-when-clear:
+  while its flag is clear the opcode succeeds without inspecting any signature, so the genesis
+  binary rejects nothing there and activation only ADDS a requirement.
+* eLTOO is unaffected. Its channel outputs are already v6 (`src/stagenet-eltoo.cpp` `MakeV6Spk`,
+  `OP_6 <SHA256(witnessScript)>`) and its ANYPREVOUT signatures are verified inside the v6
+  witnessScript.
+
+⛔ **SEQUENCING IS PART OF THE FORK CLASS — this is a rule on the activation coordination, not
+on the code.** `DEPLOYMENT_APO` MUST activate in the SAME flag-day as
+`DEPLOYMENT_P2WSH_DILITHIUM` and `DEPLOYMENT_DILITHIUM_KEYHASH`. Measured against the genesis
+binary a combined activation is a soft fork, because a dormant v6 output is anyone-can-spend and
+the genesis binary accepts any v6 script. Activating APO LATER is a loosening measured against
+the intermediate release: between the two heights a v6 script spending with an APO signature is
+rejected, and after the second height it is accepted, which splits every node running the
+v6-without-APO release. The whole covenant / eLTOO / atomic-swap stack (v6, CTV, CSFS, CDKH,
+V6_CONTROLFLOW, APO) therefore activates as ONE flag-day, which is what D1 §4 assumed.
+
+Pinned by `apo_hashtype_gate_tests`: the single-key path rejects APO *with the deployment
+active*, with an ordinary-hashtype spend as the positive control.
 
 ## 4. The additive asset-rule design the activation releases must follow
 
@@ -114,6 +142,17 @@ non-v1 address (`utiladdress.cpp`), and a stock miner builds blocks from its mem
 the anyone-can-spend window takes raw construction plus a miner running modified policy, and
 the only funds at risk are the constructor's own.
 
+Residual, tracked separately: the USDSOQ bootstrap in `ConnectBlock` selects its authority
+input by SHAPE — any `OP_5 <32>` prevout, while the tracked outpoint is null — and does not
+require the program to equal `ComputeAuthorityKeyHash`. BTCSOQ does not have this shape: its
+bootstrap pins the authority input to index 0 and signs against the tx's own new v9 marker
+output. Neither is exploitable without the authority keyset, since a bootstrap still verifies
+M-of-N ML-DSA-44 against the configured keys, and the coinbase bans remove the free miner-only
+path to planting a marker; an ordinary transaction can still create one by paying its own SOQ
+into it. Pinning the USDSOQ fallback is a tightening, so it is safe to add in the release that
+schedules USDSOQ, alongside the keyset.
+
 Tests: `witness_version_reservation_tests` (creation posture, the steal, relay refusal,
-activation-tightens, the value premise on both paths, reorg over dormant shapes),
-`v6_asset_opcode_ban_tests`, `authority_skip_gate_tests`, `usdsoq_v10_reject_path_tests`.
+activation-tightens, the value premise on both paths, reorg over dormant shapes, the coinbase
+marker bans for v5 and v9), `v6_asset_opcode_ban_tests`, `authority_skip_gate_tests`,
+`usdsoq_v10_reject_path_tests`.

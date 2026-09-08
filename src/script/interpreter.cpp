@@ -119,13 +119,35 @@ static inline void popstack(vector<valtype>& stack)
 //
 // Enforced at the call sites that actually hold `flags`, which avoids the
 // three-class interface change that was the stated reason for not gating it.
+static bool IsAPOSigHashType(const std::vector<unsigned char>& vchSig)
+{
+    if (vchSig.empty()) return false;  // let the normal path raise its own error
+    const int baseHashType = vchSig.back() & 0x7f;
+    return baseHashType == SIGHASH_ANYPREVOUT ||
+           baseHashType == SIGHASH_ANYPREVOUTANYSCRIPT;
+}
+
+//! v6 / OP_CHECKDILITHIUMKEYHASH path: gated on DEPLOYMENT_APO.
+//!
+//! Safe to gate, because the only caller sits INSIDE the
+//! `flags & SCRIPT_VERIFY_DILITHIUM_KEYHASH` branch and OP_CDKH is
+//! NOP-when-clear. While that flag is clear the opcode succeeds without
+//! looking at any signature, so the genesis binary REJECTS NOTHING here.
+//! Activating v6 + CDKH + APO together therefore only ADDS a requirement:
+//! a soft fork measured against the genesis binary, which is the test in
+//! doc/specifications/WITNESS_VERSION_FORK_CLASS.md §1.
+//!
+//! ⛔ SEQUENCING IS PART OF THE FORK CLASS. DEPLOYMENT_APO must activate in
+//! the SAME flag-day as DEPLOYMENT_P2WSH_DILITHIUM and
+//! DEPLOYMENT_DILITHIUM_KEYHASH. Activating APO LATER is a loosening measured
+//! against the intermediate release — a v6 script spending with an APO
+//! signature is rejected between the two heights and accepted after — which
+//! splits every node running the v6-without-APO release. Ruled 2026-09-08;
+//! spec §3.
 static bool APOSigHashTypeAllowed(const std::vector<unsigned char>& vchSig, unsigned int flags)
 {
     if (flags & SCRIPT_VERIFY_APO) return true;
-    if (vchSig.empty()) return true;  // let the normal path raise its own error
-    const int baseHashType = vchSig.back() & 0x7f;
-    return baseHashType != SIGHASH_ANYPREVOUT &&
-           baseHashType != SIGHASH_ANYPREVOUTANYSCRIPT;
+    return !IsAPOSigHashType(vchSig);
 }
 
 bool CheckSignatureEncoding(const vector<unsigned char>& vchSig, unsigned int flags, ScriptError* serror)
@@ -1821,15 +1843,39 @@ bool VerifyScript(const CScript& scriptSig, const CScript& scriptPubKey, const C
         // Asset and attestation opcodes are dispatched by WITNESS VERSION (v2,
         // v3, v4, v5 above), never from inside a script, and a v6 script may
         // not contain one. This is UNCONDITIONAL — not gated on the asset
-        // deployments — because EvalScript answers BAD_OPCODE for these while
-        // their flag is clear and executes them once it is set. Reachable from
-        // a v6 script, that is a rule that FAILS before an asset activation and
-        // SUCCEEDS after it, i.e. a loosening, which would make every asset
-        // activation that follows P2WSH-Dilithium a hard fork. Rejecting the
-        // opcode's presence in every state is a rule the activation release
-        // keeps, so it stays a soft fork. Scanned with GetOp so bytes inside
-        // pushes are not mistaken for opcodes; a script that fails to parse is
-        // rejected here rather than half-executed.
+        // deployments — for two reasons, which do not apply to the same
+        // opcodes:
+        //
+        //   * OP_CHECKFOLDPROOF and the four USDSOQ opcodes are flag-gated
+        //     inside EvalScript and EXECUTE once their flag is set.
+        //     OP_CHECKFOLDPROOF answers BAD_OPCODE while
+        //     SCRIPT_VERIFY_LATTICEFOLD is clear (:364); the USDSOQ four answer
+        //     the DISTINCT error SCRIPT_ERR_USDSOQ_NOT_ACTIVE while
+        //     SCRIPT_VERIFY_USDSOQ is clear (:514). Different error codes, one
+        //     shape: reachable from a v6 script, that is a rule that FAILS
+        //     before an asset activation and SUCCEEDS after it, a loosening,
+        //     which would make every asset activation that follows
+        //     P2WSH-Dilithium a hard fork. Rejecting the opcode's presence in
+        //     every state is a rule the activation release keeps, so it stays
+        //     a soft fork.
+        //   * OP_SOQUOBSCURA_RANGEPROOF answers BAD_OPCODE while
+        //     SCRIPT_VERIFY_SOQUOBSCURA is clear (:476) but does NOT execute
+        //     once it is set: it fails closed with
+        //     SCRIPT_ERR_SOQUOBSCURA_RANGEPROOF_UNVERIFIED and has deliberately
+        //     no accept path (:481). It cannot loosen while that holds, so it
+        //     is banned here as a tightening in its own right. Banning it now
+        //     is what keeps the ban free on the release that ships a verifier.
+        //   * OP_CHECKPATAGG has NO flag gate in EvalScript, because
+        //     DEPLOYMENT_CHECKPATAGG is ALWAYS_ACTIVE on every network, so it
+        //     never has a dormant state to loosen out of. It is banned here as
+        //     a tightening in its own right: v2 is the version that dispatches
+        //     PAT, and PAT verifies no signature, so the opcode has no business
+        //     inside a v6 covenant either way. Do not restate this one as
+        //     flag-gated; it is not.
+        //
+        // Scanned with GetOp so bytes inside pushes are not mistaken for
+        // opcodes; a script that fails to parse is rejected here rather than
+        // half-executed.
         {
             CScript::const_iterator pc = witnessScript.begin();
             opcodetype op;
@@ -1970,8 +2016,25 @@ bool VerifyScript(const CScript& scriptSig, const CScript& scriptPubKey, const C
     // The signing path passes the scriptPubKey (OP_1 <32-byte-hash>) to
     // SignatureHash. Passing scriptSig (empty for witness) produces a different
     // sighash, causing every Dilithium signature to fail verification.
-    // SOQ-I010: APO sighash types are inert until DEPLOYMENT_APO activates.
-    if (!APOSigHashTypeAllowed(sig, flags)) {
+    // ⛔ SOQ-I010 / bead mpu9: APO SIGHASH TYPES ARE PERMANENTLY INVALID ON THIS
+    // PATH, AND THIS REJECTION IS NOT GATED ON DEPLOYMENT_APO. Ruled 2026-09-08.
+    //
+    // This is the single-key Dilithium path, shared by v0/v1 (active from
+    // genesis) and the v7/v8 holding shapes. Because v1 is ACTIVE from genesis,
+    // the genesis binary already rejects an APO signature here. Gating the
+    // rejection on DEPLOYMENT_APO would mean activation turns a rejection into
+    // an acceptance — a loosening, i.e. a HARD FORK — however it is scheduled.
+    // Flag-day activation does not change fork class; only direction does.
+    //
+    // eLTOO does not need APO here. Its channel outputs are witness v6
+    // (src/stagenet-eltoo.cpp MakeV6Spk) and its ANYPREVOUT signatures are
+    // verified inside the v6 witnessScript by OP_CHECKDILITHIUMKEYHASH, which
+    // is NOP-when-clear and therefore soft-fork activatable. APO reaches the
+    // chain through v6 and nowhere else.
+    //
+    // Do not "restore symmetry" by re-gating this on the flag. The asymmetry is
+    // the point: v6 is dormant at genesis and this path is not.
+    if (IsAPOSigHashType(sig)) {
         return set_error(serror, SCRIPT_ERR_SIG_HASHTYPE);
     }
 
@@ -2040,12 +2103,19 @@ bool TransactionSignatureChecker::CheckSig(const std::vector<unsigned char>& vch
     //      no-op and the Halborn Phase 2 sighash review would have been gating
     //      an already-enforced feature.
     //   ✅ "CheckSig() does not receive `flags`."  Still true, and still not
-    //      worth an interface change across three classes. The gate now lives at
-    //      the two call sites that DO hold `flags` — VerifyScript's v0/v1
-    //      Dilithium path and EvalScript's OP_CHECKDILITHIUMKEYHASH handler —
-    //      via APOSigHashTypeAllowed(). Mempool and consensus derive
-    //      SCRIPT_VERIFY_APO from the same DeploymentActiveAtHeight call, so the
-    //      two paths agree at off/off and on/on (no accept-then-reject split).
+    //      worth an interface change across three classes. The two call sites
+    //      that DO hold `flags` carry the rule, and since 2026-09-08 they carry
+    //      DIFFERENT rules, because they have different fork classes (bead
+    //      mpu9):
+    //        - VerifyScript's v0/v1 single-key Dilithium path rejects APO
+    //          UNCONDITIONALLY (IsAPOSigHashType). v1 is active from genesis, so
+    //          a deployment-gated rejection there would loosen at activation.
+    //        - EvalScript's OP_CHECKDILITHIUMKEYHASH handler stays gated on
+    //          SCRIPT_VERIFY_APO (APOSigHashTypeAllowed), because the opcode is
+    //          NOP-when-clear, so the genesis binary rejects nothing there.
+    //      Mempool and consensus derive SCRIPT_VERIFY_APO from the same
+    //      DeploymentActiveAtHeight call, so the v6 path agrees at off/off and
+    //      on/on (no accept-then-reject split).
     //
     // Pinned by src/test/apo_hashtype_gate_tests.cpp.
     //
