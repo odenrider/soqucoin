@@ -1484,6 +1484,10 @@ public:
         consensus.hashGenesisBlock = genesis.GetHash();
         digishieldConsensus.hashGenesisBlock = consensus.hashGenesisBlock;
         auxpowConsensus.hashGenesisBlock = consensus.hashGenesisBlock;
+        // Every tier carries the genesis fields, including the mirror tier
+        // copied above; asserted for every network by genesis_chainparams_tests
+        // (bead stagenet-mirror-tier-zeroed-genesis-lfll).
+        maturityMirrorConsensus.hashGenesisBlock = consensus.hashGenesisBlock;
         assert(consensus.hashGenesisBlock == uint256S("0x97df3ae79eaf5623c0feecfa1079439f8acdfea06a0f2acb4ef63c6b9ad91bb0"));
 
         // SOQ-H3: Lattice-BP++ consensus seed
@@ -1493,6 +1497,7 @@ public:
             "N=256,Q=8380417,K=4,range=64");
         digishieldConsensus.latticeBPSeed = consensus.latticeBPSeed;
         auxpowConsensus.latticeBPSeed = consensus.latticeBPSeed;
+        maturityMirrorConsensus.latticeBPSeed = consensus.latticeBPSeed;
         // Phase 4 byte-less merkle root (unchanged — same coinbase, new serialization)
         assert(genesis.hashMerkleRoot == uint256S("0x994391b757742376b24ebdd37b0fa9ebc11da47366ca8f9ac0a21094da350736"));
 
