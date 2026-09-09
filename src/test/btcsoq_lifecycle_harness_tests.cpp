@@ -778,23 +778,11 @@ BOOST_AUTO_TEST_CASE(btcsoq_freeze_unfreeze_freeze_round_trip_is_accepted)
 // order a transaction meets them: the marker prevout unavailable in both the
 // view and the block undo; a null witness on the authority input; an empty
 // signature set after extraction; and M-of-N verification failing. The mempool
-// path mirrors them. Sites are named by their error() text rather than by line
+// path has three of the four (no null-witness site). Sites are named by their
+// error() text rather than by line
 // number, and each case below was attributed to its site by reading the text
 // it produced. The prevout-unavailable site has no case here.
 // ===========================================================================
-
-//! An authority-shaped witness stack whose signature slots hold filler.
-//! Carried on the FEE input by any case that empties the authority input's
-//! witness, so that the case is rejected by the rule under test and not by
-//! per-input script verification of the fee input.
-static std::vector<std::vector<unsigned char>> DecoyStack(uint8_t tag)
-{
-    std::vector<std::vector<unsigned char>> s;
-    BuildAuthorityWitnessStack(s, tag,
-        std::vector<uint8_t>(DILITHIUM_SIG_SIZE, 0xcc),
-        std::vector<uint8_t>(DILITHIUM_SIG_SIZE, 0xdd));
-    return s;
-}
 
 static const uint256 AUTHSIG_DEPOSIT_A = uint256S(
     "bccc00000000000000000000000000000000000000000000000000000000a001");
@@ -875,9 +863,6 @@ BOOST_AUTO_TEST_CASE(chained_btcsoq_mint_with_no_witness_on_the_authority_input_
         BuildMint(coinbaseTxns[1], AUTHSIG_DEPOSIT_B, 1, coinbasePk, &marker);
     m2.vin[0].scriptWitness.stack.clear();
 
-    // No decoy on the fee input here: this transaction is rejected in
-    // CheckTransaction, before any per-input verification, so a decoy would
-    // be inert.
     BOOST_REQUIRE_MESSAGE(m2.vin[0].scriptWitness.IsNull(),
         "the authority input must carry no witness");
     BOOST_REQUIRE_MESSAGE(m2.vin[0].scriptSig.empty(),
@@ -904,9 +889,6 @@ BOOST_AUTO_TEST_CASE(chained_btcsoq_mint_with_a_scriptsig_in_place_of_the_author
     m2.vin[0].scriptWitness.stack.clear();
     // Not a public key and not 1313 bytes; only the first byte is tested.
     m2.vin[0].scriptSig = CScript() << std::vector<unsigned char>{0x00, 0xab, 0xcd};
-    // Keeps the fee input from failing script verification first, which would
-    // stop the case isolating the authority rule.
-    m2.vin[1].scriptWitness.stack = DecoyStack(BTCSOQ_OP_MINT);
 
     BOOST_CHECK_MESSAGE(CTransaction(m2).HasDilithiumSignatures(),
         "the scriptSig fallback must be satisfied, or this case degenerates "
@@ -945,7 +927,6 @@ BOOST_AUTO_TEST_CASE(chained_btcsoq_mint_with_no_extractable_signatures_is_rejec
     stack.push_back(std::vector<unsigned char>{0x00});             // [4] not a sig
     stack.push_back(std::vector<unsigned char>{0x00});             // [5] authority_set
     m2.vin[0].scriptWitness.stack = stack;
-    m2.vin[1].scriptWitness.stack = DecoyStack(BTCSOQ_OP_MINT);
 
     // The tag check must pass, or this case asserts bad-btcsoq-tag-mismatch and
     // never reaches the extractor.
@@ -1218,7 +1199,9 @@ BOOST_AUTO_TEST_CASE(btcsoq_freeze_with_an_unknown_op_byte_is_rejected)
 
 // ---- The presence control for every case above --------------------------
 
-// PRESENCE CONTROLS. Each of the twelve cases above mutates one field of a
+// PRESENCE CONTROLS. Each of the twelve mutated cases since the
+// authority-signature header (eleven under the op-binding header plus
+// btcsoq_v8_output_under_a_non_mint_op_is_rejected) mutates one field of a
 // chained authority tx and asserts one exact reject string. If the unmutated
 // shape were itself invalid, those cases could pass for the wrong reason and
 // nothing in the suite would say so.
@@ -1396,8 +1379,9 @@ BOOST_AUTO_TEST_CASE(spending_a_frozen_btcsoq_utxo_is_rejected)
 //     ConnectBlock spends every input in a first pass, and the FREEZE target
 //     liveness check reads the view in a later pass, by which time the spend
 //     has been applied, so the target reads as dead. The frozen-spend arm is
-//     not reached for this pair. The reverse transaction order cannot be built
-//     here, because the burn spends the marker output the freeze creates.
+//     not reached for this pair. The reverse order (burn first, then a freeze
+//     chained off the burn's marker) lands on the same string, because the
+//     burn spends the target in the first pass.
 //
 //   UNFREEZE + spend in ONE block -> accepted. The UNFREEZE branch requires
 //     only that the outpoint is frozen, so the in-block unfreeze lifts the

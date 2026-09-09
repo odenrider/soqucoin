@@ -120,7 +120,7 @@ BOOST_AUTO_TEST_CASE(usdsoq_bootstrap_reentry_is_rejected_while_the_database_hol
         BOOST_REQUIRE(pcoinsdbview->ReadUSDSOQAuthorityOutpoint(persisted));
         BOOST_REQUIRE(!persisted.IsNull());
 
-        // The damaged state the H2 guard exists for.
+        // The damaged state the bootstrap re-entry guard exists for.
         g_usdsoq_authority_outpoint.SetNull();
     }
 
