@@ -383,8 +383,13 @@ struct BTCSOQChainSetup : public TestingSetup {
     //! tracked marker, vin[1] the SOQ fee, and vin[2] the minted v8 when
     //! `spendV8`. `burnSats` goes into the signed payload verbatim, so a caller
     //! can drive both the payload parse and the intent-mismatch rule.
+    //! `v8Override` burns a v8 coin other than the mint's own output, which is
+    //! how a caller reaches the supply-underflow guard: see the reachability
+    //! note above that case.
     CMutableTransaction BuildBurn(const CTransaction& fundCoinbase, const uint256& mintHash,
-                                  CAmount burnSats, bool spendV8)
+                                  CAmount burnSats, bool spendV8,
+                                  const COutPoint* v8Override = nullptr,
+                                  CAmount v8Value = MINT_SATS)
     {
         CMutableTransaction tx; tx.nVersion = 2;
         const CAmount fund = fundCoinbase.vout[0].nValue;
@@ -394,7 +399,9 @@ struct BTCSOQChainSetup : public TestingSetup {
         CTxIn fee; fee.prevout = COutPoint(fundCoinbase.GetHash(), 0);
         fee.nSequence = CTxIn::SEQUENCE_FINAL; tx.vin.push_back(fee);
         if (spendV8) {
-            CTxIn v8; v8.prevout = COutPoint(mintHash, 1); v8.nSequence = CTxIn::SEQUENCE_FINAL;
+            CTxIn v8;
+            v8.prevout = v8Override ? *v8Override : COutPoint(mintHash, 1);
+            v8.nSequence = CTxIn::SEQUENCE_FINAL;
             tx.vin.push_back(v8);
         }
 
@@ -405,7 +412,7 @@ struct BTCSOQChainSetup : public TestingSetup {
 
         SignV1(tx, 1, coinbaseSpk, fund, coinbaseKey, coinbasePk);
         if (spendV8)
-            SignV1(tx, 2, MakeV8Spk(coinbasePk), MINT_SATS, coinbaseKey, coinbasePk);
+            SignV1(tx, 2, MakeV8Spk(coinbasePk), v8Value, coinbaseKey, coinbasePk);
         SignAuthority(tx, 0, BTCSOQ_OP_BURN);
         return tx;
     }
@@ -1259,6 +1266,229 @@ BOOST_AUTO_TEST_CASE(the_unmutated_chained_btcsoq_mint_is_accepted)
         BuildMint(coinbaseTxns[1], OPBIND_DEPOSIT_B, 1, coinbasePk, &marker);
 
     BOOST_CHECK_EQUAL(RejectReasonFor({m2}), "");
+}
+
+// ===========================================================================
+// SUPPLY AND BOOTSTRAP INVARIANT GUARDS (bead 244e, order item 3).
+//
+// REACHABILITY FIRST, as that bead requires, and the answer changes what these
+// tests should be. Three of the four rules below cannot be reached by any
+// sequence of valid blocks. They guard a damaged local state; they are not
+// consensus surface an attacker can drive.
+//
+//   bad-btcsoq-supply-overflow — CBTCSOQSupply::Mint fails only when
+//     total_minted + amount leaves MoneyRange (the MoneyRange guards in
+//     CBTCSOQSupply::Mint).
+//     ParseBTCSOQMintPayload caps every single mint at BTCSOQ_MAX_SATS = 2.1e15
+//     and MAX_MONEY is 2e18, so an overflow needs more than 950 maximum-value
+//     mints inside ONE block. Each authority mint carries two 2420-byte
+//     signatures, so that block cannot be built. Reached below by preloading the
+//     counter.
+//
+//   bad-btcsoq-supply-underflow — Burn fails only when total_burned + amount
+//     exceeds total_minted (the cannot-burn-more-than-minted guard in
+//     CBTCSOQSupply::Burn). On a real chain every v8
+//     UTXO was counted into total_minted when it was created, so the v8 inputs
+//     of any block sum to at most the outstanding supply. Reached below by
+//     injecting a v8 coin that no mint produced.
+//
+//   bad-btcsoq-bootstrap-reentry — needs LevelDB to hold an authority outpoint
+//     while the in-memory global is null. No block sequence produces that; a
+//     partial reindex or a corrupted datadir does, which is what the rule says.
+//     Reached below by nulling the global and leaving the database alone.
+//
+// The fourth, bad-btcsoq-authority-outpoint, IS attacker-reachable: it is the
+// rule that stops a second authority transaction from ignoring the chain of
+// custody, and its case needs no injected state.
+//
+// Recording the split is the point. "Untested" was the right flag on all four,
+// but only one of them has an attack. For the other three the correct shape is
+// to inject the damaged state and prove the guard still fires, and a later
+// reader should not mistake them for live consensus surface.
+// ===========================================================================
+
+// The one with an attack: a valid authority witness on a transaction that does
+// not continue the chain of custody.
+BOOST_AUTO_TEST_CASE(a_second_authority_tx_that_ignores_the_tracked_outpoint_is_rejected)
+{
+    SeedAuthorityChain(coinbaseTxns[0], OPBIND_DEPOSIT_A);
+
+    // Bootstrap-SHAPED: no marker input at all, submitted while the tracked
+    // outpoint is set. The authority signature is genuine; the only thing wrong
+    // with the transaction is that it ignores the tracked UTXO.
+    CMutableTransaction m2 = BuildMint(coinbaseTxns[1], OPBIND_DEPOSIT_B, 1, coinbasePk);
+
+    BOOST_CHECK_EQUAL(RejectReasonFor({m2}), "bad-btcsoq-authority-outpoint");
+}
+
+BOOST_AUTO_TEST_CASE(btcsoq_supply_overflow_guard_fires_with_the_counter_at_the_ceiling)
+{
+    const uint256 m1 = SeedAuthorityChain(coinbaseTxns[0], OPBIND_DEPOSIT_A);
+    COutPoint marker(m1, 0);
+
+    {
+        LOCK(cs_main);
+        const CAmount headroom = MAX_MONEY - g_btcsoq_supply.TotalMinted() - 1;
+        BOOST_REQUIRE(g_btcsoq_supply.Mint(headroom));
+        BOOST_REQUIRE_EQUAL(g_btcsoq_supply.TotalMinted(), MAX_MONEY - 1);
+    }
+
+    CMutableTransaction m2 =
+        BuildMint(coinbaseTxns[1], OPBIND_DEPOSIT_B, 1, coinbasePk, &marker);
+
+    BOOST_CHECK_EQUAL(RejectReasonFor({m2}), "bad-btcsoq-supply-overflow");
+}
+
+BOOST_AUTO_TEST_CASE(btcsoq_supply_underflow_guard_fires_on_a_v8_coin_no_mint_produced)
+{
+    const uint256 m1 = SeedAuthorityChain(coinbaseTxns[0], OPBIND_DEPOSIT_A);
+
+    // Injected straight into the UTXO set, so nothing ever counted it into
+    // total_minted. Burning it takes total_burned past total_minted.
+    const CAmount phantom = MINT_SATS * 2;
+    COutPoint ghost = SeedCoin(MakeV8Spk(coinbasePk), phantom, 0xb8);
+
+    CMutableTransaction bn = BuildBurn(coinbaseTxns[1], m1, phantom, /*spendV8=*/true,
+                                       &ghost, phantom);
+
+    BOOST_CHECK_EQUAL(RejectReasonFor({bn}), "bad-btcsoq-supply-underflow");
+}
+
+BOOST_AUTO_TEST_CASE(btcsoq_bootstrap_reentry_is_rejected_while_the_database_holds_an_outpoint)
+{
+    SeedAuthorityChain(coinbaseTxns[0], OPBIND_DEPOSIT_A);
+
+    {
+        LOCK(cs_main);
+        // Also the presence control for this case: it proves the accepted mint
+        // really did persist an outpoint, so the reject below cannot come from
+        // an empty database.
+        COutPoint persisted;
+        BOOST_REQUIRE(pcoinsdbview->ReadBTCSOQAuthorityOutpoint(persisted));
+        BOOST_REQUIRE(!persisted.IsNull());
+        g_btcsoq_authority_outpoint.SetNull();
+    }
+
+    CMutableTransaction m2 = BuildMint(coinbaseTxns[1], OPBIND_DEPOSIT_B, 1, coinbasePk);
+
+    BOOST_CHECK_EQUAL(RejectReasonFor({m2}), "bad-btcsoq-bootstrap-reentry");
+}
+
+// ---- The frozen registry (bead 244e, order item 4) ----------------------
+//
+// bad-txns-spend-frozen-btcsoq has two arms and the source comment on the
+// frozen-registry guard makes a strong claim about both: the guard "applies
+// to ALL txs (a freeze blocks even an authority burn of that outpoint)" and the
+// committed set is overlaid with the block's own freeze/unfreeze ops "so both
+// passes see the same state". Each arm gets a case, because a test of the
+// committed arm alone would leave the overlay unmeasured.
+
+BOOST_AUTO_TEST_CASE(spending_a_frozen_btcsoq_utxo_is_rejected)
+{
+    const uint256 m1 = SeedAuthorityChain(coinbaseTxns[0], OPBIND_DEPOSIT_A);
+    COutPoint marker(m1, 0), v8(m1, 1);
+
+    CMutableTransaction fz = BuildFreeze(coinbaseTxns[1], FREEZE_OP_FREEZE, v8, &marker);
+    CBlock bf = CreateAndProcessBlock({fz}, coinbaseSpk);
+    BOOST_REQUIRE(chainActive.Tip()->GetBlockHash() == bf.GetHash());
+    {
+        LOCK(cs_main);
+        // Presence control: without this the reject below could come from an
+        // empty registry and a different rule.
+        BOOST_REQUIRE(pcoinsdbview->IsBTCSOQFrozen(v8));
+    }
+
+    // An ORDINARY transfer of the frozen coin — no authority, no marker, so the
+    // frozen registry is the only thing that can reject it.
+    const CAmount fund = coinbaseTxns[2].vout[0].nValue;
+    CMutableTransaction xfer; xfer.nVersion = 2;
+    CTxIn in; in.prevout = v8; in.nSequence = CTxIn::SEQUENCE_FINAL;
+    xfer.vin.push_back(in);
+    CTxIn fee; fee.prevout = COutPoint(coinbaseTxns[2].GetHash(), 0);
+    fee.nSequence = CTxIn::SEQUENCE_FINAL; xfer.vin.push_back(fee);
+    xfer.vout.push_back(CTxOut(MINT_SATS, MakeV8Spk(coinbasePk)));   // v8 in == v8 out
+    xfer.vout.push_back(CTxOut(fund - 10000, coinbaseSpk));
+    SignV1(xfer, 0, MakeV8Spk(coinbasePk), MINT_SATS, coinbaseKey, coinbasePk);
+    SignV1(xfer, 1, coinbaseSpk, fund, coinbaseKey, coinbasePk);
+
+    BOOST_CHECK_EQUAL(RejectReasonFor({xfer}), "bad-txns-spend-frozen-btcsoq");
+}
+
+// THE IN-BLOCK OVERLAY, AND IT DOES NOT WORK THE WAY THE COMMENT READS.
+// The frozen-registry guard's own comment says it "applies to ALL txs (a freeze
+// blocks even an authority burn of that outpoint)" and that the committed set is
+// overlaid with the block's own freeze/unfreeze ops. Measured, the two halves of
+// that overlay are ASYMMETRIC, and the freeze half cannot decide anything:
+//
+//   FREEZE + spend in ONE block  -> rejected as bad-btcsoq-freeze-dead-target,
+//     not as a frozen spend, and the transaction ORDER inside the block does not
+//     matter. ConnectBlock spends every input in a first pass (the reason the
+//     authority block has to read the marker prevout out of blockundo.vtxundo at
+//     all), and the FREEZE target liveness check reads `view` in the later pass,
+//     by which time the burn's spend has already been applied, so the target
+//     always looks dead.
+//     blockFrozenAdd therefore never gets to reject a same-block spend.
+//
+//   UNFREEZE + spend in ONE block -> ACCEPTED, and this is the half that is load
+//     bearing. The UNFREEZE branch has no liveness check at all -- it requires
+//     only that the outpoint IS frozen -- so blockFrozenRemove is consulted by the
+//     spend guard and lifts the freeze within the same block.
+//
+// Both are asserted below. The first locks in the ordering result so that a
+// later change to the pass structure fails a test instead of silently changing
+// which rule is load-bearing; the second is the positive control proving the
+// overlay is not inert, which a test of the committed arm alone cannot show.
+BOOST_AUTO_TEST_CASE(a_same_block_freeze_and_spend_dies_on_the_dead_target_instead)
+{
+    const uint256 m1 = SeedAuthorityChain(coinbaseTxns[0], OPBIND_DEPOSIT_A);
+    COutPoint marker(m1, 0), v8(m1, 1);
+
+    CMutableTransaction fz = BuildFreeze(coinbaseTxns[1], FREEZE_OP_FREEZE, v8, &marker);
+    COutPoint marker2(CTransaction(fz).GetHash(), 0);
+
+    // The burn continues the chain of custody from the FREEZE's marker, so the
+    // frozen registry would be the only rule left — if it were reached.
+    CMutableTransaction bn = BuildBurn(coinbaseTxns[2], m1, MINT_SATS, /*spendV8=*/true);
+    bn.vin[0].prevout = marker2;
+    SignV1(bn, 1, coinbaseSpk, coinbaseTxns[2].vout[0].nValue, coinbaseKey, coinbasePk);
+    SignV1(bn, 2, MakeV8Spk(coinbasePk), MINT_SATS, coinbaseKey, coinbasePk);
+    SignAuthority(bn, 0, BTCSOQ_OP_BURN);
+
+    BOOST_CHECK_EQUAL(RejectReasonFor({fz, bn}), "bad-btcsoq-freeze-dead-target");
+}
+
+BOOST_AUTO_TEST_CASE(an_unfreeze_earlier_in_the_block_permits_the_spend)
+{
+    const uint256 m1 = SeedAuthorityChain(coinbaseTxns[0], OPBIND_DEPOSIT_A);
+    COutPoint marker(m1, 0), v8(m1, 1);
+
+    // Commit the freeze in its own block.
+    CMutableTransaction fz = BuildFreeze(coinbaseTxns[1], FREEZE_OP_FREEZE, v8, &marker);
+    const uint256 fzHash = CTransaction(fz).GetHash();
+    CBlock bf = CreateAndProcessBlock({fz}, coinbaseSpk);
+    BOOST_REQUIRE(chainActive.Tip()->GetBlockHash() == bf.GetHash());
+    {
+        LOCK(cs_main);
+        BOOST_REQUIRE(pcoinsdbview->IsBTCSOQFrozen(v8));
+    }
+
+    // Now UNFREEZE and spend in the SAME block.
+    COutPoint marker3(fzHash, 0);
+    CMutableTransaction uf =
+        BuildFreeze(coinbaseTxns[2], FREEZE_OP_UNFREEZE, v8, &marker3);
+
+    const CAmount fund = coinbaseTxns[3].vout[0].nValue;
+    CMutableTransaction xfer; xfer.nVersion = 2;
+    CTxIn in; in.prevout = v8; in.nSequence = CTxIn::SEQUENCE_FINAL;
+    xfer.vin.push_back(in);
+    CTxIn fee; fee.prevout = COutPoint(coinbaseTxns[3].GetHash(), 0);
+    fee.nSequence = CTxIn::SEQUENCE_FINAL; xfer.vin.push_back(fee);
+    xfer.vout.push_back(CTxOut(MINT_SATS, MakeV8Spk(coinbasePk)));
+    xfer.vout.push_back(CTxOut(fund - 10000, coinbaseSpk));
+    SignV1(xfer, 0, MakeV8Spk(coinbasePk), MINT_SATS, coinbaseKey, coinbasePk);
+    SignV1(xfer, 1, coinbaseSpk, fund, coinbaseKey, coinbasePk);
+
+    BOOST_CHECK_EQUAL(RejectReasonFor({uf, xfer}), "");
 }
 
 BOOST_AUTO_TEST_SUITE_END()
