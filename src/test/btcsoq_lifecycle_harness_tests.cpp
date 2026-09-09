@@ -778,7 +778,7 @@ BOOST_AUTO_TEST_CASE(btcsoq_freeze_unfreeze_freeze_round_trip_is_accepted)
 // order a transaction meets them: the marker prevout unavailable in both the
 // view and the block undo; a null witness on the authority input; an empty
 // signature set after extraction; and M-of-N verification failing. The mempool
-// path has three of the four (no null-witness site). Sites are named by their
+// path has three of the four (no prevout-unavailable site). Sites are named by their
 // error() text rather than by line
 // number, and each case below was attributed to its site by reading the text
 // it produced. The prevout-unavailable site has no case here.
@@ -1199,9 +1199,9 @@ BOOST_AUTO_TEST_CASE(btcsoq_freeze_with_an_unknown_op_byte_is_rejected)
 
 // ---- The presence control for every case above --------------------------
 
-// PRESENCE CONTROLS. Each of the twelve mutated cases since the
-// authority-signature header (eleven under the op-binding header plus
-// btcsoq_v8_output_under_a_non_mint_op_is_rejected) mutates one field of a
+// PRESENCE CONTROLS. Each of the twelve mutated cases (eleven under the
+// op-binding header plus btcsoq_v8_output_under_a_non_mint_op_is_rejected)
+// mutates one field of a
 // chained authority tx and asserts one exact reject string. If the unmutated
 // shape were itself invalid, those cases could pass for the wrong reason and
 // nothing in the suite would say so.
