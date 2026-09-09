@@ -953,6 +953,17 @@ BOOST_AUTO_TEST_CASE(chained_btcsoq_mint_with_a_scriptsig_in_place_of_the_author
 // below-threshold case, which keeps one real signature and reaches M-of-N
 // verification -- both assert the same string, and only the error() text tells
 // them apart.
+//
+// ⚠️ THIS CASE CANNOT DETECT THE REMOVAL OF THE RULE IT COVERS, and that is a
+// fact about the rule rather than about the case. Neutered in a mutation sweep,
+// the empty-signature guard produced no test failure: execution falls through to
+// CBTCSOQAuthority::VerifyAuthoritySignatures, which opens with its own
+// sigs.empty() rejection and would in any case fail valid_count >= threshold, so
+// the same input is rejected with the same string one site later. The guard is
+// therefore redundant for every input that reaches it. Keeping the case is still
+// worth it two ways: it pins that the input SHAPE is rejected, and the survival
+// of the mutant is the evidence that the verifier is not vacuous on an empty set,
+// which is the failure the guard exists to backstop.
 BOOST_AUTO_TEST_CASE(chained_btcsoq_mint_with_no_extractable_signatures_is_rejected)
 {
     CMutableTransaction m1 = BuildMint(coinbaseTxns[0], AUTHSIG_DEPOSIT_A, 0, coinbasePk);
@@ -1427,7 +1438,11 @@ BOOST_AUTO_TEST_CASE(spending_a_frozen_btcsoq_utxo_is_rejected)
 //     all), and the FREEZE target liveness check reads `view` in the later pass,
 //     by which time the burn's spend has already been applied, so the target
 //     always looks dead.
-//     blockFrozenAdd therefore never gets to reject a same-block spend.
+//     blockFrozenAdd therefore never gets to reject a same-block spend. It is
+//     shadowed rather than broken: neutering the liveness check in a mutation
+//     sweep makes this same case reject with bad-txns-spend-frozen-btcsoq, so
+//     the overlay's freeze half does work and is simply unreachable behind a
+//     rule that always fires first.
 //
 //   UNFREEZE + spend in ONE block -> ACCEPTED, and this is the half that is load
 //     bearing. The UNFREEZE branch has no liveness check at all -- it requires
