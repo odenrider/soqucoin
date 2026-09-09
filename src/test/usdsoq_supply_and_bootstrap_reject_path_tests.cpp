@@ -7,8 +7,8 @@
 // another bead:
 //
 //   bad-usdsoq-supply-overflow      the supply guard in ConnectBlock's mint path
-//   bad-usdsoq-bootstrap-reentry     the H2 re-entry guard in ConnectBlock's
-//                                    USDSOQ bootstrap branch
+//   bad-usdsoq-bootstrap-reentry    the H2 re-entry guard in ConnectBlock's
+//                                   USDSOQ bootstrap branch
 //
 // Rules are named by symbol, not by file and line: a line number in a test
 // comment is checked by nothing and drifts on the next edit to validation.cpp.
