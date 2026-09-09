@@ -1022,8 +1022,7 @@ BOOST_AUTO_TEST_CASE(an_authority_tx_carrying_both_asset_markers_is_rejected)
     CScript v5spk = CScript() << OP_5 << std::vector<unsigned char>(kh.begin(), kh.end());
     m2.vout.back().nValue -= 10000;
     m2.vout.push_back(CTxOut(10000, v5spk));
-    SignV1(m2, 1, coinbaseSpk, coinbaseTxns[1].vout[0].nValue, coinbaseKey, coinbasePk);
-    SignAuthority(m2, 0, BTCSOQ_OP_MINT);
+    ReSignChainedAuthority(m2, coinbaseTxns[1], BTCSOQ_OP_MINT);
 
     BOOST_CHECK_EQUAL(RejectReasonFor({m2}), "bad-txns-dual-authority-marker");
 }
@@ -1086,8 +1085,7 @@ BOOST_AUTO_TEST_CASE(btcsoq_v8_output_under_a_non_mint_op_is_rejected)
     BOOST_REQUIRE_EQUAL(fz.vout.size(), 3u);
     fz.vout.back().nValue -= MINT_SATS;
     fz.vout.push_back(CTxOut(MINT_SATS, MakeV8Spk(coinbasePk)));
-    SignV1(fz, 1, coinbaseSpk, coinbaseTxns[1].vout[0].nValue, coinbaseKey, coinbasePk);
-    SignAuthority(fz, 0, BTCSOQ_OP_FREEZE);
+    ReSignChainedAuthority(fz, coinbaseTxns[1], BTCSOQ_OP_FREEZE);
 
     BOOST_CHECK_EQUAL(RejectReasonFor({fz}), "bad-btcsoq-unbound-mint");
 }
@@ -1526,9 +1524,8 @@ BOOST_AUTO_TEST_CASE(a_same_block_freeze_and_spend_dies_on_the_dead_target_inste
     // frozen registry would be the only rule left — if it were reached.
     CMutableTransaction bn = BuildBurn(coinbaseTxns[2], m1, MINT_SATS, /*spendV8=*/true);
     bn.vin[0].prevout = marker2;
-    SignV1(bn, 1, coinbaseSpk, coinbaseTxns[2].vout[0].nValue, coinbaseKey, coinbasePk);
-    SignV1(bn, 2, MakeV8Spk(coinbasePk), MINT_SATS, coinbaseKey, coinbasePk);
-    SignAuthority(bn, 0, BTCSOQ_OP_BURN);
+    SignV1(bn, 2, MakeV8Spk(coinbasePk), MINT_SATS, coinbaseKey, coinbasePk);  // v8, not in the helper
+    ReSignChainedAuthority(bn, coinbaseTxns[2], BTCSOQ_OP_BURN);
 
     BOOST_CHECK_EQUAL(RejectReasonFor({fz, bn}), "bad-btcsoq-freeze-dead-target");
 }
