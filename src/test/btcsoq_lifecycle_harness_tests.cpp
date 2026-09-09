@@ -951,6 +951,17 @@ BOOST_AUTO_TEST_CASE(chained_btcsoq_mint_with_a_scriptsig_in_place_of_the_author
 // below-threshold case, which keeps one real signature and reaches M-of-N
 // verification -- both assert the same string, and only the error() text tells
 // them apart.
+//
+// ⚠️ THIS CASE CANNOT DETECT THE REMOVAL OF THE RULE IT COVERS, and that is a
+// fact about the rule rather than about the case. Neutered in a mutation sweep,
+// the empty-signature guard produced no test failure: execution falls through to
+// CBTCSOQAuthority::VerifyAuthoritySignatures, which opens with its own
+// sigs.empty() rejection and would in any case fail valid_count >= threshold, so
+// the same input is rejected with the same string one site later. The guard is
+// therefore redundant for every input that reaches it. The case is kept for two
+// reasons: it pins that the input SHAPE is rejected, and the survival of the
+// mutant is itself the evidence that the verifier is not vacuous on an empty
+// signature set, which is the failure the guard exists to backstop.
 BOOST_AUTO_TEST_CASE(chained_btcsoq_mint_with_no_extractable_signatures_is_rejected)
 {
     CMutableTransaction m1 = BuildMint(coinbaseTxns[0], AUTHSIG_DEPOSIT_A, 0, coinbasePk);
@@ -1351,6 +1362,19 @@ BOOST_AUTO_TEST_CASE(the_unmutated_chained_btcsoq_burn_is_accepted)
 
 // The one with an attack: a valid authority witness on a transaction that does
 // not continue the chain of custody.
+//
+// MUTATION RESULT: this rule is the ONLY thing rejecting the transaction below.
+// Removing it and falling back to the BOOTSTRAP treatment -- index 0 as the
+// authority input, sighash against the new v9 marker output, which is exactly
+// the behaviour the rule denies once a chain exists -- makes the block CONNECT,
+// with an empty reject reason. The transaction under test carries genuine
+// authority signatures, so what this measures is the authority's own chain of
+// custody; an outsider without the keys is still stopped by M-of-N verification.
+//
+// The counterfactual has to be written that way. Neutering the rejection alone
+// leaves nAuthorityInputIndex at -1 and the next use indexes tx.vin with it, so
+// that mutant runs on out-of-bounds memory and whatever it reports is not a
+// property of the code.
 BOOST_AUTO_TEST_CASE(a_second_authority_tx_that_ignores_the_tracked_outpoint_is_rejected)
 {
     SeedAuthorityChain(coinbaseTxns[0], OPBIND_DEPOSIT_A);
@@ -1469,6 +1493,10 @@ BOOST_AUTO_TEST_CASE(spending_a_frozen_btcsoq_utxo_is_rejected)
 //     `view` in the later pass, by which time the burn's spend has already been
 //     applied, so the target always looks dead.
 //     blockFrozenAdd therefore never gets to reject a same-block spend.
+//     It is shadowed rather than broken: neutering the liveness check in a
+//     mutation sweep makes this same case reject with
+//     bad-txns-spend-frozen-btcsoq, so the overlay's freeze half does work and
+//     is simply unreachable behind a rule that always fires first.
 //
 //     The result follows from the two-pass structure and not from where the
 //     transactions sit in the block, since the first pass has spent every input
@@ -1560,6 +1588,10 @@ BOOST_AUTO_TEST_CASE(an_unfreeze_earlier_in_the_block_permits_the_spend)
 // Its USDSOQ twin is covered in usdsoq_marker_spend_tests. That file names
 // bad-btcsoq-marker-spend in two comments, which is why a keyword sweep of the
 // test tree recorded this string as covered when nothing asserted it.
+//
+// MUTATION RESULT: neutered, this block CONNECTS with an empty reject reason, so
+// the rule is the only thing standing between a marker holder and a severed
+// chain of custody. Nothing else in the validation path objects.
 BOOST_AUTO_TEST_CASE(an_ordinary_tx_must_not_spend_the_btcsoq_authority_marker)
 {
     const uint256 m1 = SeedAuthorityChain(coinbaseTxns[0], OPBIND_DEPOSIT_A);
