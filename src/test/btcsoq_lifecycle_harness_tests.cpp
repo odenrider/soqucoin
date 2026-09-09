@@ -695,4 +695,220 @@ BOOST_AUTO_TEST_CASE(btcsoq_freeze_unfreeze_freeze_round_trip_is_accepted)
         "accepted — the rule is about redundancy, not about freezing once");
 }
 
+// ===========================================================================
+// AUTHORITY-SIGNATURE REJECT PATHS (bead reject-string-coverage-gap-244e).
+//
+// bad-btcsoq-authority-sig covers seven sites (validation.cpp 1117, 1134, 1146,
+// 4909, 4954, 4976, 4990) and appeared nowhere in the tree until now, along with
+// bad-btcsoq-tag-mismatch, bad-btcsoq-missing-op, bad-btcsoq-unbound-mint and
+// bad-btcsoq-unbound-burn. Every existing case in this file signs with the real
+// authority; none measured what happens when the signature is wrong.
+//
+// The chained shape is used throughout because it is the one an attacker has
+// access to: the tracked marker outpoint is public on-chain.
+// ===========================================================================
+
+//! An authority-SHAPED witness stack whose signature slots hold filler.
+//! CTransaction::HasDilithiumSignatures grants the whole-transaction authority
+//! exemption on stack SHAPE alone -- six items, the op tag at index 2, and at
+//! least one item of exactly 2420 bytes. Needed on the FEE input for any case
+//! that empties the authority input's witness, because otherwise
+//! bad-txns-requires-dilithium rejects first and shadows the rule under test.
+static std::vector<std::vector<unsigned char>> DecoyStack(uint8_t tag)
+{
+    std::vector<std::vector<unsigned char>> s;
+    s.push_back(std::vector<unsigned char>{0x00});
+    s.push_back(std::vector<unsigned char>{0x00});
+    s.push_back(std::vector<unsigned char>{tag});
+    s.push_back(std::vector<unsigned char>{0x00});
+    s.push_back(std::vector<unsigned char>(2420, 0xcc));
+    s.push_back(std::vector<unsigned char>(2420, 0xdd));
+    s.push_back(std::vector<unsigned char>{0x00});
+    return s;
+}
+
+static const uint256 AUTHSIG_DEPOSIT_A = uint256S(
+    "bccc00000000000000000000000000000000000000000000000000000000a001");
+static const uint256 AUTHSIG_DEPOSIT_B = uint256S(
+    "bccc00000000000000000000000000000000000000000000000000000000a002");
+
+BOOST_AUTO_TEST_CASE(chained_btcsoq_mint_signed_by_outsiders_is_rejected)
+{
+    CMutableTransaction m1 = BuildMint(coinbaseTxns[0], AUTHSIG_DEPOSIT_A, 0, coinbasePk);
+    const uint256 m1Hash = CTransaction(m1).GetHash();
+    CBlock b1 = CreateAndProcessBlock({m1}, coinbaseSpk);
+    BOOST_REQUIRE(chainActive.Tip()->GetBlockHash() == b1.GetHash());
+    COutPoint marker(m1Hash, 0);
+
+    CMutableTransaction m2 =
+        BuildMint(coinbaseTxns[1], AUTHSIG_DEPOSIT_B, 1, coinbasePk, &marker);
+
+    // Re-sign the authority input with two keypairs outside the set. The layout
+    // and the sighash are correct, so only set membership can reject it.
+    AuthKey out0, out1;
+    {
+        CTransaction ctx(m2);
+        uint256 h = SignatureHash(markerSpk, ctx, 0, SIGHASH_ALL, CAmount(0),
+                                  SIGVERSION_WITNESS_V0, nullptr);
+        BuildAuthorityWitnessStack(m2.vin[0].scriptWitness.stack, BTCSOQ_OP_MINT,
+                                   AuthSign(h, out0.sk), AuthSign(h, out1.sk));
+    }
+
+    BOOST_CHECK_EQUAL(RejectReasonFor({m2}), "bad-btcsoq-authority-sig");
+}
+
+BOOST_AUTO_TEST_CASE(chained_btcsoq_mint_below_threshold_is_rejected)
+{
+    CMutableTransaction m1 = BuildMint(coinbaseTxns[0], AUTHSIG_DEPOSIT_A, 0, coinbasePk);
+    const uint256 m1Hash = CTransaction(m1).GetHash();
+    CBlock b1 = CreateAndProcessBlock({m1}, coinbaseSpk);
+    BOOST_REQUIRE(chainActive.Tip()->GetBlockHash() == b1.GetHash());
+    COutPoint marker(m1Hash, 0);
+
+    CMutableTransaction m2 =
+        BuildMint(coinbaseTxns[1], AUTHSIG_DEPOSIT_B, 1, coinbasePk, &marker);
+
+    // Replace the second signature with a one-byte item. The extractor selects
+    // by exact DILITHIUM_SIG_SIZE, so the verifier sees one signature against a
+    // threshold of two.
+    m2.vin[0].scriptWitness.stack[5] = std::vector<unsigned char>{0x00};
+    BOOST_REQUIRE_EQUAL(
+        ExtractBTCSOQWitnessSignatures(m2.vin[0].scriptWitness.stack).size(), 1u);
+
+    BOOST_CHECK_EQUAL(RejectReasonFor({m2}), "bad-btcsoq-authority-sig");
+}
+
+// THE CROSS-ASSET COMPARISON, AND IT DOES NOT COME OUT THE WAY IT READS.
+// The USDSOQ sibling accepts a chained authority tx whose authority input
+// carries NO witness, because its branch is an if/else-if pair with no final
+// else (bead usdsoq-authority-mofn-bypass-ihvw). BTCSOQ has an explicit
+// rejection for exactly that state at validation.cpp:4954. Measured, that
+// rejection never runs: the transaction dies earlier, in CheckTransaction.
+//
+// The reason is that CTransaction::HasDilithiumSignatures' whole-transaction
+// authority exemption keys on an OP_5 output specifically, so a BTCSOQ
+// authority tx (OP_9 marker) does not get it, and its empty-witness input then
+// fails the per-input check. Reaching validation.cpp:4954 would require adding
+// an OP_5 output to a v9 authority tx, which bad-txns-dual-authority-marker
+// forbids (pinned by the case below).
+//
+// So the BTCSOQ arm is defence in depth rather than the operative rule, and
+// USDSOQ is exposed by the same asymmetry that protects BTCSOQ: one shared
+// helper recognises one asset's marker. Recorded because "BTCSOQ already
+// rejects this" is the obvious summary and it is not what the code does.
+BOOST_AUTO_TEST_CASE(chained_btcsoq_mint_with_no_witness_on_the_authority_input_dies_earlier)
+{
+    CMutableTransaction m1 = BuildMint(coinbaseTxns[0], AUTHSIG_DEPOSIT_A, 0, coinbasePk);
+    const uint256 m1Hash = CTransaction(m1).GetHash();
+    CBlock b1 = CreateAndProcessBlock({m1}, coinbaseSpk);
+    BOOST_REQUIRE(chainActive.Tip()->GetBlockHash() == b1.GetHash());
+    COutPoint marker(m1Hash, 0);
+
+    CMutableTransaction m2 =
+        BuildMint(coinbaseTxns[1], AUTHSIG_DEPOSIT_B, 1, coinbasePk, &marker);
+    m2.vin[0].scriptWitness.stack.clear();
+    m2.vin[1].scriptWitness.stack = DecoyStack(BTCSOQ_OP_MINT);
+
+    BOOST_REQUIRE_MESSAGE(m2.vin[0].scriptWitness.IsNull(),
+        "the authority input must carry no witness");
+    BOOST_CHECK_MESSAGE(!CTransaction(m2).HasDilithiumSignatures(),
+        "a v9 authority tx cannot take the OP_5-keyed exemption, so the decoy "
+        "buys nothing here — this is the asymmetry with USDSOQ");
+
+    // NOT bad-btcsoq-authority-sig. If it ever becomes that string, the
+    // exemption has been widened to v9 and validation.cpp:4954 is now the
+    // operative rule — update this case rather than deleting it.
+    BOOST_CHECK_EQUAL(RejectReasonFor({m2}), "bad-txns-requires-dilithium");
+}
+
+// bad-txns-dual-authority-marker. Each marker grants its own asset's ex-nihilo
+// exemption, so a transaction carrying both would need stacked exemptions
+// reasoned about; it is invalid instead. Untested until now, and it is what
+// stops the v9 path from reaching the OP_5 exemption above.
+BOOST_AUTO_TEST_CASE(an_authority_tx_carrying_both_asset_markers_is_rejected)
+{
+    CMutableTransaction m1 = BuildMint(coinbaseTxns[0], AUTHSIG_DEPOSIT_A, 0, coinbasePk);
+    const uint256 m1Hash = CTransaction(m1).GetHash();
+    CBlock b1 = CreateAndProcessBlock({m1}, coinbaseSpk);
+    BOOST_REQUIRE(chainActive.Tip()->GetBlockHash() == b1.GetHash());
+    COutPoint marker(m1Hash, 0);
+
+    CMutableTransaction m2 =
+        BuildMint(coinbaseTxns[1], AUTHSIG_DEPOSIT_B, 1, coinbasePk, &marker);
+
+    // Splice a USDSOQ v5 marker in beside the BTCSOQ v9 one, funded from change.
+    uint256 kh;
+    CSHA256().Write(coinbasePk.data(), coinbasePk.size()).Finalize(kh.begin());
+    CScript v5spk = CScript() << OP_5 << std::vector<unsigned char>(kh.begin(), kh.end());
+    m2.vout.back().nValue -= 10000;
+    m2.vout.push_back(CTxOut(10000, v5spk));
+    SignV1(m2, 1, coinbaseSpk, coinbaseTxns[1].vout[0].nValue, coinbaseKey, coinbasePk);
+    SignAuthority(m2, 0, BTCSOQ_OP_MINT);
+
+    BOOST_CHECK_EQUAL(RejectReasonFor({m2}), "bad-txns-dual-authority-marker");
+}
+
+BOOST_AUTO_TEST_CASE(btcsoq_witness_tag_must_match_the_signed_op_tag)
+{
+    CMutableTransaction m1 = BuildMint(coinbaseTxns[0], AUTHSIG_DEPOSIT_A, 0, coinbasePk);
+    const uint256 m1Hash = CTransaction(m1).GetHash();
+    CBlock b1 = CreateAndProcessBlock({m1}, coinbaseSpk);
+    BOOST_REQUIRE(chainActive.Tip()->GetBlockHash() == b1.GetHash());
+    COutPoint marker(m1Hash, 0);
+
+    CMutableTransaction m2 =
+        BuildMint(coinbaseTxns[1], AUTHSIG_DEPOSIT_B, 1, coinbasePk, &marker);
+
+    // The signed OP_RETURN still says MINT. Only the unsigned witness tag moves,
+    // which is the whole reason the equality check exists: the witness is not
+    // sighash-covered and is malleable in flight.
+    m2.vin[0].scriptWitness.stack[2] = std::vector<unsigned char>{BTCSOQ_OP_FREEZE};
+
+    BOOST_CHECK_EQUAL(RejectReasonFor({m2}), "bad-btcsoq-tag-mismatch");
+}
+
+BOOST_AUTO_TEST_CASE(btcsoq_authority_tx_without_an_op_envelope_is_rejected)
+{
+    CMutableTransaction m1 = BuildMint(coinbaseTxns[0], AUTHSIG_DEPOSIT_A, 0, coinbasePk);
+    const uint256 m1Hash = CTransaction(m1).GetHash();
+    CBlock b1 = CreateAndProcessBlock({m1}, coinbaseSpk);
+    BOOST_REQUIRE(chainActive.Tip()->GetBlockHash() == b1.GetHash());
+    COutPoint marker(m1Hash, 0);
+
+    CMutableTransaction m2 =
+        BuildMint(coinbaseTxns[1], AUTHSIG_DEPOSIT_B, 1, coinbasePk, &marker);
+
+    // BuildMint lays out [0] marker, [1] v8 mint, [2] op envelope, [3] change.
+    BOOST_REQUIRE_EQUAL(m2.vout.size(), 4u);
+    m2.vout.erase(m2.vout.begin() + 2);
+    // Re-sign: removing an output changes the SIGHASH_ALL sighash, and an
+    // authority-sig rejection would then shadow the missing-op rule.
+    SignAuthority(m2, 0, BTCSOQ_OP_MINT);
+
+    BOOST_CHECK_EQUAL(RejectReasonFor({m2}), "bad-btcsoq-missing-op");
+}
+
+// Asset flows must match the signed op: v8 outputs may only be created under
+// MINT. Here a FREEZE-tagged authority tx carries a v8 output.
+BOOST_AUTO_TEST_CASE(btcsoq_v8_output_under_a_non_mint_op_is_rejected)
+{
+    CMutableTransaction m1 = BuildMint(coinbaseTxns[0], AUTHSIG_DEPOSIT_A, 0, coinbasePk);
+    const uint256 m1Hash = CTransaction(m1).GetHash();
+    CBlock b1 = CreateAndProcessBlock({m1}, coinbaseSpk);
+    BOOST_REQUIRE(chainActive.Tip()->GetBlockHash() == b1.GetHash());
+    COutPoint marker(m1Hash, 0);
+    COutPoint v8op(m1Hash, 1);
+
+    CMutableTransaction fz = BuildFreeze(coinbaseTxns[1], FREEZE_OP_FREEZE, v8op, &marker);
+    // Splice a v8 output into an otherwise valid FREEZE, funded out of the
+    // change, then re-sign so the rejection is the op binding and not the sig.
+    BOOST_REQUIRE_EQUAL(fz.vout.size(), 3u);
+    fz.vout.back().nValue -= MINT_SATS;
+    fz.vout.push_back(CTxOut(MINT_SATS, MakeV8Spk(coinbasePk)));
+    SignV1(fz, 1, coinbaseSpk, coinbaseTxns[1].vout[0].nValue, coinbaseKey, coinbasePk);
+    SignAuthority(fz, 0, BTCSOQ_OP_FREEZE);
+
+    BOOST_CHECK_EQUAL(RejectReasonFor({fz}), "bad-btcsoq-unbound-mint");
+}
+
 BOOST_AUTO_TEST_SUITE_END()
