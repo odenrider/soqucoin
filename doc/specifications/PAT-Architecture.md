@@ -1,5 +1,7 @@
 # PAT (Practical Aggregation Technique) Architecture
 
+> Status (2026-09-11): LatticeFold+ batch verification (`OP_CHECKFOLDPROOF`, witness v3) is deprecated and its deployment does not activate on any network; the Stage 2 and block 100,000 references below are historical. Its successor for confidential assets and succinct proofs is SoquObscura, in research and not scheduled on any network. PAT is unchanged and ships.
+
 > **Version**: 1.0
 > **Last Updated**: January 20, 2026
 > **Audience**: Security auditors, developers, researchers

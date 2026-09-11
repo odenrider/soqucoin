@@ -73,7 +73,7 @@ Verified against src/chainparams.cpp (mainnet parameters begin at line 133).
 |---|---|---|---|
 | CSV, SegWit | CSV, SEGWIT | ALWAYS_ACTIVE | chainparams.cpp:222-228 |
 | PAT aggregation (witness v2) | CHECKPATAGG | ALWAYS_ACTIVE | chainparams.cpp:231-233 |
-| LatticeFold (witness v3) | LATTICEFOLD | retired, can never activate | chainparams.cpp:261-263 |
+| LatticeFold (witness v3) | LATTICEFOLD | deprecated; nStartTime 0, nTimeout 0, does not activate on any network | chainparams.cpp:286-287 |
 | SoquObscura (witness v4/v10) | SOQUOBSCURA | NOT_SCHEDULED on all four networks | chainparams.cpp:352, 644, 894, 1205 |
 | USDSOQ (witness v5/v7/v10) | USDSOQ | NOT_SCHEDULED | chainparams.cpp:353 |
 | BTCSOQ (witness v8/v9) | BTCSOQ | NOT_SCHEDULED | chainparams.cpp:354 |

@@ -250,7 +250,8 @@ validator, which accepts the first matching output and stops
 (`validation.cpp:5401`); that behaviour depends on coinbase output order and
 permits a decoy ahead of the intended commitment. The same observation applies
 to LatticeFold itself and is recorded for a separate review; LatticeFold is
-withdrawn, so it is not urgent.
+deprecated and its deployment does not activate on any network, so it is not
+urgent.
 
 A 2-byte magic is a weak tag: any 36-byte `OP_RETURN` beginning with the same
 four bytes parses as a commitment. The coinbase is miner-controlled, so a

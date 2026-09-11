@@ -44,7 +44,7 @@ Soqucoin is **post-quantum resistant from day one**. It uses:
 - **Dilithium (ML-DSA-44)**: NIST FIPS 204 standardized signatures replacing ECDSA
 - **Bulletproofs++**: Optional confidential transaction amounts
 - **PAT**: Practical Aggregation Technique for efficient batch verification
-- **LatticeFold+**: Lattice-based recursive SNARKs (activates at height 100,000)
+- **LatticeFold+**: deprecated batch verification (`OP_CHECKFOLDPROOF`, witness v3); the deployment does not activate on any network. Its successor for confidential assets and succinct proofs is SoquObscura, in research and not scheduled on any network
 
 ## Mining Information ⛏
 

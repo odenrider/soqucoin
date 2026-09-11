@@ -251,7 +251,7 @@ cp config.example.json config.json && nano config.json
 | **LaBRADOR Aggregator** | _(planned; no path yet)_ | ◻ Not started |
 | **PQ Wallet Library** | `src/wallet/pqwallet/` | ✅ In-tree |
 
-Note: Lattice-BP++ (SOQ-P002) and LatticeFold+ are deprecated and superseded by SoquObscura (SOQ-P010). Deprecated code will be removed in the next node release.
+Note: Lattice-BP++ (SOQ-P002) is superseded by SoquObscura (SOQ-P010). LatticeFold+ batch verification (`OP_CHECKFOLDPROOF`, witness v3) is deprecated. The opcode remains in the tree behind a deployment that does not activate on any network. It was reviewed in the April 2026 external extension audit. Its successor for confidential assets and succinct proofs is SoquObscura, a lattice-based confidential-asset system in research, whose deployment is not scheduled on any network and which is subject to the second external audit phase before any activation.
 
 > ⛔ **Status note, so this table is not read as a claim of what exists.** Rows marked
 > ◻ have **no code in this tree**. Earlier revisions of this table cited concrete paths
