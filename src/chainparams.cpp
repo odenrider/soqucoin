@@ -546,9 +546,9 @@ public:
         // the tier that validates every height >= 1 (bead ldbr; the helper walks the
         // tier tree from pConsensusRoot, so on mainnet it writes `consensus` and
         // auxpowConsensus, and ArmMigration asserts the vector against the constants).
-        // Struct defaults propagate
-        // into digishieldConsensus and auxpowConsensus via the copies above, which is why
-        // the inert state needs no call. Procedure: doc/GENESIS_CEREMONY.md.
+        // Struct defaults propagate into digishieldConsensus and auxpowConsensus via
+        // the copies above, which is why the inert state needs no call.
+        // Procedure: doc/GENESIS_CEREMONY.md.
 
         // SOQ-H3: Lattice-BP++ consensus seed — derived from genesis hash
         consensus.latticeBPSeed = ComputeSoquObscuraSeed(
