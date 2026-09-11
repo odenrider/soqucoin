@@ -72,7 +72,7 @@ This document defines the threat model for the Soqucoin post-quantum wallet (`li
 | Timeframe | CRQC Availability | Soqucoin Mitigation |
 |-----------|-------------------|---------------------|
 | 2026-2030 | Unlikely | Dilithium provides future-proofing |
-| 2030-2035 | Possible | Dilithium + LatticeFold provide ~128-bit PQ security |
+| 2030-2035 | Possible | Dilithium (ML-DSA-44) provides ~128-bit PQ security; LatticeFold+ is deprecated and not part of the security argument |
 | 2035+ | Probable | Migration path to stronger parameters if needed |
 
 **Design Decision**: Soqucoin uses NIST Level 2 (Dilithium2/ML-DSA-44) which provides 128-bit security against both classical and quantum adversaries per NIST SP 800-208.
