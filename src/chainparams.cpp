@@ -6,6 +6,7 @@
 
 #include "chainparams.h"
 #include "consensus/merkle.h"
+#include "hash.h"
 
 #include "tinyformat.h"
 #include "utilstrencodings.h"
@@ -136,6 +137,28 @@ static CBlock CreateGenesisBlockStagenet(uint32_t nTime, uint32_t nNonce, uint32
  * data, so nothing-up-my-sleeve. The genesis coinbase is excluded from the
  * UTXO set regardless; this choice is about what decoders display.
  */
+/**
+ * Writes the genesis-migration allocation constants into every height tier of a
+ * params set (bead chainparams-migration-arming-tier-footgun-ldbr).
+ *
+ * GetConsensus(nHeight) walks a height-indexed tree: on mainnet every height >= 1
+ * resolves to auxpowConsensus, never to `consensus`. ConnectBlock reads the
+ * migration fields through GetConsensus(pindex->nHeight), so a value assigned to
+ * `consensus` alone after the tier copies is invisible at the armed height and
+ * the rule stays silently inert. Every arming path, regtest or ceremony, goes
+ * through this function so the three tiers can never disagree.
+ */
+static void ArmMigrationTiers(Consensus::Params& base, Consensus::Params& digishield,
+                              Consensus::Params& auxpow, const uint256& hashOutputs,
+                              CAmount nTotal, int nHeight)
+{
+    for (Consensus::Params* tier : {&base, &digishield, &auxpow}) {
+        tier->hashMigrationOutputs = hashOutputs;
+        tier->nMigrationTotal = nTotal;
+        tier->nMigrationHeight = nHeight;
+    }
+}
+
 static CBlock CreateGenesisBlockMainnet(uint32_t nTime, uint32_t nNonce, uint32_t nBits, int32_t nVersion, const CAmount& genesisReward)
 {
     const char* pszTimestamp = "The Block 26/Aug/2026 First quantum-resistant Bitcoin transaction mined BTC 965186 d3b0f490";
@@ -508,10 +531,17 @@ public:
         // Genesis-migration allocation constants (DL-GENESIS-MIGRATION-IMPLEMENTATION §A1).
         // Deliberately NOT set here: hashMigrationOutputs stays null, nMigrationTotal 0,
         // nMigrationHeight 0, so the rule is inert. If a migration window is ever run,
-        // the ceremony sets all three beside these genesis pins (with vMigrationOutputs
-        // compiled in and asserted against the hash) at a scheduled post-genesis height,
-        // per doc/GENESIS_CEREMONY.md. Struct defaults propagate into digishieldConsensus
-        // and auxpowConsensus via the copies above.
+        // the ceremony arms the rule at a scheduled post-genesis height with ONE call:
+        //
+        //     ArmMigration(uint256S("<hash_migration_outputs>"), <n_migration_total>, <H>,
+        //                  { CTxOut(...), ... });   // the published outputs.hex, in order
+        //
+        // Never assign consensus.hashMigrationOutputs here directly: the tier copies ran
+        // above, so a value written to `consensus` alone never reaches auxpowConsensus,
+        // the tier that validates every height >= 1 (bead ldbr; the helper writes all
+        // three and asserts the vector against the constants). Struct defaults propagate
+        // into digishieldConsensus and auxpowConsensus via the copies above, which is why
+        // the inert state needs no call. Procedure: doc/GENESIS_CEREMONY.md.
 
         // SOQ-H3: Lattice-BP++ consensus seed — derived from genesis hash
         consensus.latticeBPSeed = ComputeSoquObscuraSeed(
@@ -554,6 +584,28 @@ public:
             0,    // No transactions yet
             0.0   // No estimated tx rate yet
         };
+    }
+
+private:
+    /** The only permitted way to arm the migration rule on mainnet (bead ldbr).
+     *  Writes all three height tiers through ArmMigrationTiers and refuses, at
+     *  construction time, a vector that does not hash to the published constant or
+     *  sum to the published total: a node built with mismatched constants must not
+     *  start, because at H it would reject every honest block. Unused while the
+     *  rule is inert; the ceremony adds the single call documented above. */
+    void ArmMigration(const uint256& hashOutputs, CAmount nTotal, int nHeight,
+                      const std::vector<CTxOut>& vOutputs)
+    {
+        assert(nHeight > 0);
+        assert(!vOutputs.empty());
+        CHashWriter hasher(SER_GETHASH, PROTOCOL_VERSION);
+        hasher << vOutputs;
+        assert(hasher.GetHash() == hashOutputs);
+        CAmount sum = 0;
+        for (const CTxOut& out : vOutputs) sum += out.nValue;
+        assert(sum == nTotal);
+        ArmMigrationTiers(consensus, digishieldConsensus, auxpowConsensus, hashOutputs, nTotal, nHeight);
+        vMigrationOutputs = vOutputs;
     }
 };
 static CMainParams mainParams;
@@ -1105,18 +1157,12 @@ public:
     void UpdateMigrationParams(const uint256& hashOutputs, CAmount nTotal, int nHeight,
                                const std::vector<CTxOut>& vOutputs)
     {
-        // ⚠️ ALL THREE structs, for the same height-indexed-tree reason as
+        // ALL THREE structs, for the same height-indexed-tree reason as
         // UpdateActivationHeight above (bead tofg): a migration height above 19
-        // resolves to auxpowConsensus, not `consensus`.
-        consensus.hashMigrationOutputs = hashOutputs;
-        consensus.nMigrationTotal = nTotal;
-        consensus.nMigrationHeight = nHeight;
-        digishieldConsensus.hashMigrationOutputs = hashOutputs;
-        digishieldConsensus.nMigrationTotal = nTotal;
-        digishieldConsensus.nMigrationHeight = nHeight;
-        auxpowConsensus.hashMigrationOutputs = hashOutputs;
-        auxpowConsensus.nMigrationTotal = nTotal;
-        auxpowConsensus.nMigrationHeight = nHeight;
+        // resolves to auxpowConsensus, not `consensus`. Shared with the mainnet
+        // ceremony path (bead ldbr). Hash, total and height are taken as given so
+        // tests can arm deliberately inconsistent values (tamper case 10).
+        ArmMigrationTiers(consensus, digishieldConsensus, auxpowConsensus, hashOutputs, nTotal, nHeight);
         vMigrationOutputs = vOutputs;
     }
 
