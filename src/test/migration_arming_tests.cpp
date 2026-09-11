@@ -28,6 +28,8 @@
 
 #include <boost/test/unit_test.hpp>
 
+#include <set>
+
 namespace {
 
 // Heights that land on every tier boundary any network has: genesis, the
@@ -117,6 +119,30 @@ BOOST_AUTO_TEST_CASE(every_network_every_tier_agrees)
     for (const std::string& net : networks) {
         CheckTiersAgree(Params(net), net);
     }
+}
+
+// Presence control for the agreement check above: the sampled heights must
+// reach a distinct tier struct for every tier GetConsensus can return, or the
+// check would compare one struct with itself. The counts are the reachable
+// tiers per network that ArmMigrationTiers documents; stagenet's fourth tier
+// (the maturity mirror at 100000) is the one a fixed-arity helper missed.
+BOOST_AUTO_TEST_CASE(sampled_heights_reach_every_reachable_tier)
+{
+    const struct { const char* net; size_t tiers; } expected[] = {
+        {CBaseChainParams::MAIN.c_str(), 2},
+        {CBaseChainParams::TESTNET.c_str(), 2},
+        {CBaseChainParams::REGTEST.c_str(), 3},
+        {CBaseChainParams::STAGENET.c_str(), 4},
+    };
+    for (const auto& e : expected) {
+        const CChainParams& params = Params(e.net);
+        std::set<const Consensus::Params*> seen;
+        for (int h : kSampleHeights) seen.insert(&params.GetConsensus(h));
+        BOOST_CHECK_MESSAGE(seen.size() == e.tiers,
+            e.net << ": sampled heights reach " << seen.size() << " tier structs, expected " << e.tiers);
+    }
+    const CChainParams& stagenet = Params(CBaseChainParams::STAGENET);
+    BOOST_CHECK(&stagenet.GetConsensus(99999) != &stagenet.GetConsensus(100000));
 }
 
 // The shared arming path puts the constants where ConnectBlock reads them,
