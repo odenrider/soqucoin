@@ -1179,6 +1179,12 @@ UniValue getblockchaininfo(const JSONRPCRequest& request)
             "        \"timeout\": xx,         (numeric) the median time past of a block at which the deployment is considered failed if not yet locked in\n"
             "        \"since\": xx            (numeric) height of the first block to which the status applies\n"
             "     }\n"
+            "  },\n"
+            "  \"genesis_migration\": {      (object) the one-shot allocation rule this node enforces\n"
+            "     \"armed\": xx,              (boolean) true when this node carries the constants: compiled into a release, or set on regtest by -migrationheight and -migrationoutputs\n"
+            "     \"height\": xx,             (numeric) the one height the rule applies at (0 = inert)\n"
+            "     \"hash_migration_outputs\": \"xxxx\",  (string) the committed output vector hash (all zero = inert)\n"
+            "     \"total_sats\": xx          (numeric) the committed total in sats\n"
             "  }\n"
             "}\n"
             "\nExamples:\n" +
@@ -1233,6 +1239,21 @@ UniValue getblockchaininfo(const JSONRPCRequest& request)
     BIP9SoftForkDescPushBack(bip9_softforks, "csfs", consensusParams, Consensus::DEPLOYMENT_CSFS);
     obj.pushKV("softforks", softforks);
     obj.pushKV("bip9_softforks", bip9_softforks);
+    // Genesis-migration allocation rule (DL-GENESIS-MIGRATION-IMPLEMENTATION §A1).
+    // A node whose constants differ from the network's rejects the armed block, so
+    // operators need to see which constants a node enforces before it reaches that
+    // height. Read through the tier that validates the armed height, which is the
+    // struct ConnectBlock consults (bead ldbr).
+    {
+        const int nMigrationHeight = consensusParams.nMigrationHeight;
+        const Consensus::Params& armedTier = Params().GetConsensus(nMigrationHeight > 0 ? nMigrationHeight : 0);
+        UniValue migration(UniValue::VOBJ);
+        migration.pushKV("armed", nMigrationHeight != 0 && !armedTier.hashMigrationOutputs.IsNull());
+        migration.pushKV("height", armedTier.nMigrationHeight);
+        migration.pushKV("hash_migration_outputs", armedTier.hashMigrationOutputs.GetHex());
+        migration.pushKV("total_sats", armedTier.nMigrationTotal);
+        obj.pushKV("genesis_migration", migration);
+    }
     obj.pushKV("warnings", GetWarnings("statusbar"));
     return obj;
 }

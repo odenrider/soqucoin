@@ -119,6 +119,7 @@ BITCOIN_TESTS =\
   test/pat_tests.cpp \
   test/pat_script_tests.cpp \
   test/merkle_tests.cpp \
+  test/migration_arming_tests.cpp \
   test/migration_rule_tests.cpp \
   test/miner_tests.cpp \
   test/net_tests.cpp \

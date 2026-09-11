@@ -1252,6 +1252,21 @@ bool AppInitParameterInteraction()
         LogPrintf("Arming regtest genesis-migration rule: height=%d total=%d outputs=%u hash=%s\n",
                   (int)nMigrationHeight, nMigrationTotal, (unsigned)vOutputs.size(), hashOutputs.ToString());
     }
+    // On every network, say at startup which genesis-migration constants this
+    // binary enforces. A node whose constants differ from the network's rejects
+    // the armed block, so this line is what an operator checks before the node
+    // reaches that height (bead ldbr; also getblockchaininfo).
+    {
+        const int nArmedHeight = chainparams.GetConsensus(0).nMigrationHeight;
+        const Consensus::Params& tier = chainparams.GetConsensus(nArmedHeight > 0 ? nArmedHeight : 0);
+        if (nArmedHeight != 0 && !tier.hashMigrationOutputs.IsNull()) {
+            LogPrintf("Genesis-migration allocation rule ARMED: height=%d total=%d outputs=%u hash=%s\n",
+                      tier.nMigrationHeight, tier.nMigrationTotal,
+                      (unsigned)chainparams.MigrationOutputs().size(), tier.hashMigrationOutputs.ToString());
+        } else {
+            LogPrintf("Genesis-migration allocation rule inert (height 0, null hash)\n");
+        }
+    }
     return true;
 }
 
