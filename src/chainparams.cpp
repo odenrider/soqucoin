@@ -543,8 +543,10 @@ public:
         //
         // Never assign consensus.hashMigrationOutputs here directly: the tier copies ran
         // above, so a value written to `consensus` alone never reaches auxpowConsensus,
-        // the tier that validates every height >= 1 (bead ldbr; the helper writes all
-        // three and asserts the vector against the constants). Struct defaults propagate
+        // the tier that validates every height >= 1 (bead ldbr; the helper walks the
+        // tier tree from pConsensusRoot, so on mainnet it writes `consensus` and
+        // auxpowConsensus, and ArmMigration asserts the vector against the constants).
+        // Struct defaults propagate
         // into digishieldConsensus and auxpowConsensus via the copies above, which is why
         // the inert state needs no call. Procedure: doc/GENESIS_CEREMONY.md.
 
