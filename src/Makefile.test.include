@@ -189,6 +189,7 @@ BITCOIN_TESTS =\
   test/usdsoq_v7_conservation_harness_tests.cpp \
   test/usdsoq_v10_reject_path_tests.cpp \
   test/usdsoq_supply_and_bootstrap_reject_path_tests.cpp \
+  test/rpc_getblockstats_asset_tests.cpp \
   test/soquobscura_keyimage_deadcode_tests.cpp \
   test/witness_version_allocation_tests.cpp \
   test/consensus_digest_tests.cpp \

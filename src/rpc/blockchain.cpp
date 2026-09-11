@@ -1553,6 +1553,8 @@ static UniValue getblockstats(const JSONRPCRequest& request)
         throw std::runtime_error(
             "getblockstats hash ( stats )\n"
             "\nCompute per block statistics for a given window. All amounts are in koinus.\n"
+            "Fee statistics count native SOQ only: USDSOQ and BTCSOQ outputs are conserved\n"
+            "or minted per asset by consensus and are never a fee.\n"
             "It won't work for some heights with pruning.\n"
             "\nArguments:\n"
             "1. \"hash\"               (string, required) The block hash of the target block\n"
@@ -1671,9 +1673,13 @@ static UniValue getblockstats(const JSONRPCRequest& request)
         outputs += tx->vout.size();
 
         CAmount tx_total_out = 0;
+        CAmount tx_soq_out = 0;
         if (loop_outputs) {
             for (const CTxOut& out : tx->vout) {
                 tx_total_out += out.nValue;
+                if (out.IsNativeSOQ()) {
+                    tx_soq_out += out.nValue;
+                }
                 utxo_size_inc += GetSerializeSize(out, SER_NETWORK, PROTOCOL_VERSION) + PER_UTXO_OVERHEAD;
                 if (do_duststats) {
                     if (tx->IsCoinBase()) {
@@ -1724,17 +1730,29 @@ static UniValue getblockstats(const JSONRPCRequest& request)
         }
 
         if (loop_inputs) {
-            CAmount tx_total_in = 0;
+            CAmount tx_soq_in = 0;
             const auto& txundo = blockUndo.vtxundo.at(i - 1);
             for (const CTxInUndo& coin : txundo.vprevout) {
                 const CTxOut& prevoutput = coin.txout;
 
-                tx_total_in += prevoutput.nValue;
+                if (prevoutput.IsNativeSOQ()) {
+                    tx_soq_in += prevoutput.nValue;
+                }
                 utxo_size_inc -= GetSerializeSize(prevoutput, SER_NETWORK, PROTOCOL_VERSION) + PER_UTXO_OVERHEAD;
             }
 
-            CAmount txfee = tx_total_in - tx_total_out;
-            assert(MoneyRange(txfee));
+            // The fee is SOQ in minus SOQ out, as ConnectBlock computes it.
+            // USDSOQ (v7, v10) and BTCSOQ (v8) are conserved per asset, and an
+            // authority transaction mints or burns them with no SOQ
+            // counterpart, so a sum over every output is not a SOQ quantity:
+            // a mint made this difference negative and the assertion that
+            // used to sit here aborted the daemon.
+            const CAmount txfee = tx_soq_in - tx_soq_out;
+            if (!MoneyRange(txfee)) {
+                throw JSONRPCError(RPC_INTERNAL_ERROR,
+                    strprintf("Fee out of range for transaction %s in block %s",
+                              tx->GetHash().GetHex(), pindex->GetBlockHash().GetHex()));
+            }
             if (do_medianfee) {
                 fee_array.push_back(txfee);
             }
