@@ -73,7 +73,7 @@ Verified against src/chainparams.cpp (mainnet parameters begin at line 133).
 |---|---|---|---|
 | CSV, SegWit | CSV, SEGWIT | ALWAYS_ACTIVE | chainparams.cpp:222-228 |
 | PAT aggregation (witness v2) | CHECKPATAGG | ALWAYS_ACTIVE | chainparams.cpp:231-233 |
-| LatticeFold (witness v3) | LATTICEFOLD | retired, can never activate | chainparams.cpp:261-263 |
+| LatticeFold (witness v3) | LATTICEFOLD | deprecated; nStartTime 0, nTimeout 0, does not activate on any network | chainparams.cpp:286-287 |
 | SoquObscura (witness v4/v10) | SOQUOBSCURA | NOT_SCHEDULED on all four networks | chainparams.cpp:352, 644, 894, 1205 |
 | USDSOQ (witness v5/v7/v10) | USDSOQ | NOT_SCHEDULED | chainparams.cpp:353 |
 | BTCSOQ (witness v8/v9) | BTCSOQ | NOT_SCHEDULED | chainparams.cpp:354 |
@@ -142,10 +142,11 @@ words because a reviewer will otherwise state it less charitably.
 Current state by network: mainnet, testnet, and regtest ship EMPTY
 authority keysets, and validation default-denies every authority-shaped
 transaction when the keyset is uninitialized. Combined with NOT_SCHEDULED
-deployment heights on mainnet, no one, including the project, can mint,
-burn, or freeze on mainnet at genesis. Stagenet carries 2-of-3 test
-keysets (chainparams.cpp:1218-1234) and is where asset flows have actually
-been exercised.
+deployment heights on mainnet, no authority keyset exists there and no
+party can mint, burn or freeze at genesis. The authority model exists for
+licensed issuers and custodians. The project is not an issuer and holds no
+reserves. Stagenet carries 2-of-3 test keysets (chainparams.cpp:1218-1234)
+and is where asset flows have actually been exercised.
 
 History a scanner will find and should read in context: stagenet enforced
 authority signatures from height 7700 onward

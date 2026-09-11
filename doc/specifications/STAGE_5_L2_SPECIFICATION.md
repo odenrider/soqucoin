@@ -1,5 +1,7 @@
 # Stage 5: L2SOQ — Quantum-Safe Payment Channel Network
 
+> Status (2026-09-11): LatticeFold+ batch verification (`OP_CHECKFOLDPROOF`, witness v3) is deprecated and its deployment does not activate on any network; the Stage 2 and ALWAYS_ACTIVE references to it below are historical and batch settlement is not a shipped feature. Its successor for succinct proofs is SoquObscura, in research and not scheduled on any network.
+
 > **Version**: 0.5 (ELTOO Architecture)
 > **Status**: PROTOTYPE — Single-Hop ELTOO Channels Functional on Stagenet
 > **Classification**: PUBLIC - Research Specification  

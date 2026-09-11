@@ -1,5 +1,7 @@
 # Soqucoin Protocol Parameters & Consensus Cost Specification
 
+> Status (2026-09-11): LatticeFold+ batch verification (`OP_CHECKFOLDPROOF`, witness v3) is deprecated and its deployment does not activate on any network; the ALWAYS_ACTIVE references to it below are historical. Its successor for confidential assets and succinct proofs is SoquObscura, in research and not scheduled on any network.
+
 > **Version**: 4.1 | **Status**: Pre-Mainnet
 > **Last Updated**: July 2, 2026
 > **Specification Tag**: Mainnet Candidate v1.0.0-rc4

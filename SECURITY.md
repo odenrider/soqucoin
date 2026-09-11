@@ -9,7 +9,7 @@
 
 ## Reporting a Vulnerability
 
-Soqucoin Core is a post-quantum cryptocurrency with native Dilithium batching and recursive LatticeFold+ verification. Security is therefore non-negotiable.
+Soqucoin Core is a post-quantum cryptocurrency with native Dilithium (ML-DSA-44) signatures and PAT batch attestation. LatticeFold+ batch verification is deprecated and its deployment does not activate on any network. Security is therefore non-negotiable.
 
 To report a security vulnerability, please send a PGP-encrypted email to:
 

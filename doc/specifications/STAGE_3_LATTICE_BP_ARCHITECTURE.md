@@ -1,5 +1,7 @@
 # Soqucoin Lattice-BP++ Privacy Architecture
 
+> Status (2026-09-11): historical document. Lattice-BP++ is superseded by SoquObscura, a lattice-based confidential-asset system in research whose deployment is not scheduled on any network and which is subject to the second external audit phase before any activation. LatticeFold+ batch verification (`OP_CHECKFOLDPROOF`, witness v3) is deprecated and its deployment does not activate on any network; the ALWAYS_ACTIVE references below are historical.
+
 > **Version**: 2.0 | **Status**: Implementation Complete, Audit Pending
 > **Author**: Soqucoin Foundation R&D
 > **Updated**: April 27, 2026

@@ -160,7 +160,11 @@ carries the launch risk the others defer.**
 ## Withdrawn — not to be activated
 
 ### `DEPLOYMENT_LATTICEFOLD` (bit 28) — `nStartTime=0 / nTimeout=0`
-Terminal `THRESHOLD_FAILED`. `OP_CHECKFOLDPROOF` and witness v3.
+Terminal `THRESHOLD_FAILED`. `OP_CHECKFOLDPROOF` and witness v3. Deprecated: the
+opcode remains in the tree behind a deployment that does not activate on any
+network. Its successor for confidential assets and succinct proofs is SoquObscura
+(`DEPLOYMENT_SOQUOBSCURA`, `NOT_SCHEDULED` on every network, subject to the second
+external audit phase before any activation).
 
 Withdrawn from launch consensus because the verifier reads its statement fields
 from the untrusted proof blob and every algebraic check is homogeneous in the

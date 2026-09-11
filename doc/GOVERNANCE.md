@@ -157,8 +157,10 @@ Like Dogecoin, Soqucoin uses **perpetual tail emission** (no supply cap) to:
 | Dilithium Signatures | ✅ ACTIVE | Genesis |
 | SegWit | ✅ ACTIVE | Always-active |
 | CSV (BIP68/112/113) | ✅ ACTIVE | Always-active |
-| PAT / LatticeFold+ | ✅ ACTIVE | Always-active |
-| Lattice-BP++, USDSOQ, CTV, APO, CSFS, P2WSH-Dilithium, UTXO Cost, Dilithium Keyhash, V6 Control Flow | 🟡 DORMANT on mainnet | Flag-day height, set after audit clearance (active on test networks) |
+| PAT | ✅ ACTIVE | Always-active |
+| LatticeFold+ (`OP_CHECKFOLDPROOF`, witness v3) | ⛔ DEPRECATED | Deployment does not activate on any network; successor SoquObscura |
+| SoquObscura (supersedes Lattice-BP++) | ◻ RESEARCH | `NOT_SCHEDULED` on every network; subject to the second external audit phase before any activation |
+| USDSOQ, CTV, APO, CSFS, P2WSH-Dilithium, UTXO Cost, Dilithium Keyhash, V6 Control Flow | 🟡 DORMANT on mainnet | Flag-day height, set after audit clearance (active on test networks) |
 
 ---
 
