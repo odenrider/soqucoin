@@ -8,7 +8,7 @@
 > redemption, of backing, or of a timeline; the specific dates and backing tables below
 > predate the current review and will be revised.
 
-> **Version**: 1.0 | **Status**: Shipped to Devnet/Stagenet
+> **Version**: 1.0 | **Status**: Design record. Demonstrated on devnet and stagenet in 2026; not deployed.
 > **Last Updated**: June 15, 2026
 > **Network**: Soqucoin ↔ Solana
 
@@ -21,17 +21,19 @@
 
 ## 1. Overview
 
-The Soqucoin-Solana Gateway enables bidirectional transfer of value between the Soqucoin mainnet and the Solana blockchain through a wrapped token mechanism.
+This document records the Soqucoin-Solana gateway design as of June 2026. The design described a bidirectional transfer of value between the Soqucoin mainnet and the Solana blockchain through a lock-and-mint / burn-and-release mechanism. The design was not deployed.
 
 | Component | Description |
 |-----------|-------------|
 | **SOQ** | Native Soqucoin token (L1, Dilithium signatures) |
-| **pSOQ** | Wrapped SOQ on Solana (SPL token inside XMSS vault) |
-| **Gateway** | Smart contract system managing lock/mint/burn/release |
+| **pSOQ** | SPL token on Solana; the design placed it inside an XMSS vault |
+| **Gateway** | Smart contract system that would manage lock/mint/burn/release |
 
 ---
 
 ## 2. Token Mechanics
+
+The flows below describe the design. They were not deployed.
 
 ### SOQ → pSOQ (Lock & Mint)
 
@@ -76,8 +78,8 @@ The Soqucoin-Solana Gateway enables bidirectional transfer of value between the 
 
 | Model | Description | Status |
 |-------|-------------|--------|
-| **1:1 Custody** | SOQ locked = pSOQ minted | ✅ Confirmed |
-| **Proof of Reserves** | Real-time on-chain dashboard | ✅ Active |
+| **1:1 Custody** | SOQ locked = pSOQ minted | Design; not deployed |
+| **Proof of Reserves** | On-chain dashboard | Design; not deployed |
 
 ---
 
@@ -128,7 +130,7 @@ The Soqucoin-Solana Gateway enables bidirectional transfer of value between the 
 | **Development** | Q2 2026 | Custom Dilithium relayer and XMSS Vault ✅ |
 | **Audit** | Q2-Q3 2026 | Halborn Phase 2 audit (in progress) |
 | **Testnet** | Q2-Q3 2026 | Integration testing on devnet and stagenet |
-| **Mainnet** | **Q3 2026** | Production gateway activation |
+| **Mainnet** | Planned for Q3 2026 at the time of writing | Not carried out; the design was not deployed |
 
 ---
 
@@ -149,17 +151,17 @@ The Soqucoin-Solana Gateway enables bidirectional transfer of value between the 
 
 ### The Core Economics
 
-pSOQ was launched on Pump.fun before Soqucoin mainnet was active. This creates a timing mismatch:
+pSOQ was launched on Solana before Soqucoin mainnet was active. This created a timing mismatch:
 
-| Asset | Supply | Current Backing |
+| Asset | Supply | Backing |
 |-------|--------|-----------------|
-| **pSOQ (Solana)** | 1 billion | ❌ Not backed (pre-gateway) |
+| **pSOQ (Solana)** | 1 billion | Not backed |
 | **SOQ (at block 100k)** | ~5 billion | N/A (native L1 token) |
 
-**"1:1" refers to the exchange rate, not supply parity:**
-- 1 SOQ locked in vault = 1 pSOQ redeemable
-- Gateway operates at 1:1 unit rate
-- Total pSOQ backing depends on SOQ locked in vault
+**In the design, "1:1" referred to the unit rate, not supply parity:**
+- 1 SOQ locked in the vault would back 1 pSOQ
+- The gateway would operate at a 1:1 unit rate
+- Total pSOQ backing would depend on SOQ locked in the vault
 
 ### pSOQ Distribution
 
@@ -170,12 +172,14 @@ pSOQ was launched on Pump.fun before Soqucoin mainnet was active. This creates a
 | **Foundation Total** | **~180M pSOQ** | **18%** | See subordination below |
 | **Public Float** | ~820M pSOQ | 82% | Trading on Solana DEXs |
 
-### Backing Model: Foundation Commitment + Open Market Redemption
+### Backing Model as Designed (June 2026): Foundation Subordination + Open Market Redemption
 
-#### Phase 1: Gateway Launch (Q3 2026)
+The model below was the design. No SOQ was locked and the design was not deployed.
+
+#### Phase 1: Gateway Launch
 
 ```
-Foundation commits: Lock 180M mined SOQ
+Foundation, per the design: lock 180M mined SOQ
 Vault balance: 180M SOQ
 pSOQ circulation: 1B
 Foundation pSOQ (subordinated): 180M
@@ -198,19 +202,19 @@ Month 6+: Approaching full backing
 ### Foundation Subordination Structure
 
 > [!NOTE]
-> The foundation's 180M pSOQ is subordinated to public holdings.
-> This means the team's pSOQ is redeemable only after public pSOQ is 100% backed.
+> The design subordinated the Foundation's 180M pSOQ to public holdings:
+> it would be redeemable only after public pSOQ was 100% backed.
 
-| Priority | Holder | Redemption Rights |
+| Priority | Holder | Redemption Rights (as designed) |
 |----------|--------|-------------------|
-| **Senior (1st)** | Public (820M pSOQ) | Can redeem immediately from vault |
-| **Junior (2nd)** | Foundation (180M pSOQ) | Can only redeem after vault ≥ 1B SOQ |
+| **Senior (1st)** | Public (820M pSOQ) | Would redeem first from the vault |
+| **Junior (2nd)** | Foundation (180M pSOQ) | Would redeem only after the vault held at least 1B SOQ |
 
-**Subordination Terms:**
-1. Foundation locks 180M mined SOQ at gateway launch.
-2. Foundation pSOQ redeems LAST, after all public pSOQ is 100% backed.
-3. Foundation cannot front-run public redemptions.
-4. Subordination is enforced by smart contract logic.
+**Subordination Terms (as designed):**
+1. The Foundation would lock 180M mined SOQ at gateway launch.
+2. Foundation pSOQ would redeem last, after all public pSOQ was 100% backed.
+3. The Foundation could not front-run public redemptions.
+4. Subordination would be enforced by smart contract logic.
 
 ### Illustrative Convergence Scenarios
 
@@ -221,9 +225,9 @@ Month 6+: Approaching full backing
 | Month 3 | ~580M SOQ | 70% | 0.65 - 0.85 |
 | Month 6+ | ~800M+ SOQ | 97%+ | 0.90 - 1.00 |
 
-*Illustrative only — not a projection or promise. Actual convergence depends on SOQ liquidity and independent market participation.*
+*Illustrative figures from the June 2026 design. Not a projection or promise; the design was not deployed.*
 
-### Why This Model Works
+### Why This Model Was Chosen
 
 | Stakeholder | Benefit |
 |-------------|---------|
@@ -232,13 +236,13 @@ Month 6+: Approaching full backing
 | **Community** | Founders cannot dump before the gateway is stable |
 | **Regulators** | Clear subordination = transparent risk hierarchy |
 
-### Required Disclosures
+### Disclosures
 
-**Pre-Gateway (Now):**
-> pSOQ is a speculation vehicle representing aspirational access to Soqucoin. 
-> It is NOT currently backed. Gateway activation is planned for Q3 2026.
+**Current (September 2026):**
+> pSOQ is a token on Solana. It is not backed by SOQ. The path from pSOQ to SOQ is in
+> legal review and details will be published when it is complete.
 
-**At Gateway Launch:**
+**Drafted in the design for a gateway launch (not used):**
 > pSOQ Gateway Economics:
 > - Total pSOQ: 1 billion
 > - Foundation holdings: 180M (18%), subordinated
@@ -322,9 +326,9 @@ Phase 3: Foundation guarantee expires, fully decentralized
 >
 > **Acceptable if properly executed.**
 
-### Recommended Approach
+### Approach Recommended at the Time
 
-Based on expert analysis, the recommended path is:
+Based on the analysis above, the path recommended in June 2026 was:
 
 | Phase | Timeline | Model | Notes |
 |-------|----------|-------|-------|
@@ -339,6 +343,8 @@ sacrificing long-term credibility.
 ---
 
 ## 10. Gateway Decisions
+
+The decisions below were recorded in June 2026 for the design. None was carried into a deployment.
 
 ### Decision 1: Relayer Provider (Custom Dilithium Committee)
 
@@ -433,10 +439,10 @@ sacrificing long-term credibility.
 | **Reduced support** | Months 18-24 | No new incentives, full function |
 | **Sunset** | Month 24+ | Gateway open, no guaranteed support |
 
-**Post-Sunset:**
-- pSOQ remains redeemable indefinitely (vault stays)
-- Minimum 3 validators maintain operations
-- Monthly community updates in final 6 months
+**Post-Sunset (as designed):**
+- pSOQ would remain redeemable indefinitely (the vault would stay)
+- At least 3 validators would maintain operations
+- Monthly community updates in the final 6 months
 
 ---
 
@@ -458,5 +464,5 @@ sacrificing long-term credibility.
 ---
 
 *Last Updated: June 15, 2026*
-*Gateway decisions pending board approval post-mainnet*
+*Gateway decisions were recorded for board review; the design was not deployed*
 *Soqucoin Core Development Team*

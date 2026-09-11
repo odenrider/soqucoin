@@ -142,10 +142,11 @@ words because a reviewer will otherwise state it less charitably.
 Current state by network: mainnet, testnet, and regtest ship EMPTY
 authority keysets, and validation default-denies every authority-shaped
 transaction when the keyset is uninitialized. Combined with NOT_SCHEDULED
-deployment heights on mainnet, no one, including the project, can mint,
-burn, or freeze on mainnet at genesis. Stagenet carries 2-of-3 test
-keysets (chainparams.cpp:1218-1234) and is where asset flows have actually
-been exercised.
+deployment heights on mainnet, no authority keyset exists there and no
+party can mint, burn or freeze at genesis. The authority model exists for
+licensed issuers and custodians. The project is not an issuer and holds no
+reserves. Stagenet carries 2-of-3 test keysets (chainparams.cpp:1218-1234)
+and is where asset flows have actually been exercised.
 
 History a scanner will find and should read in context: stagenet enforced
 authority signatures from height 7700 onward

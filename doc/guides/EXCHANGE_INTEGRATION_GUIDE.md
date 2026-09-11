@@ -10,7 +10,7 @@
 
 This guide provides comprehensive instructions for integrating Soqucoin (SOQ) into cryptocurrency exchanges. 
 
-Soqucoin is a **codebase fork** (not a hard fork) of Dogecoin Core — it uses Dogecoin's well-tested foundation while replacing the cryptographic engine with post-quantum primitives and adding high-performance feature engineering upgrades. Soqucoin begins with its own Genesis Block (Block 0) with **no shared transaction history** and **no airdrop to Dogecoin holders**. It is an entirely new and independent blockchain featuring Dilithium (ML-DSA-44) signatures and AuxPoW merged mining compatibility with Litecoin/Dogecoin.
+Soqucoin is **based on Dogecoin Core**. It uses Dogecoin's well-tested foundation while replacing the cryptographic engine with post-quantum primitives and adding high-performance feature engineering upgrades. Soqucoin begins with its own Genesis Block (Block 0) with **no shared transaction history** and **no airdrop to Dogecoin holders**. It is an entirely new and independent blockchain featuring Dilithium (ML-DSA-44) signatures and AuxPoW merged mining compatibility with Litecoin/Dogecoin.
 
 ### Key Properties
 
