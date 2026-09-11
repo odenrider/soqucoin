@@ -536,7 +536,7 @@ public:
         // Genesis-migration allocation constants (DL-GENESIS-MIGRATION-IMPLEMENTATION §A1).
         // Deliberately NOT set here: hashMigrationOutputs stays null, nMigrationTotal 0,
         // nMigrationHeight 0, so the rule is inert. If a migration window is ever run,
-        // the ceremony arms the rule at a scheduled post-genesis height with ONE call:
+        // the ceremony arms the rule, at height 1 in the launch release, with ONE call:
         //
         //     ArmMigration(uint256S("<hash_migration_outputs>"), <n_migration_total>, <H>,
         //                  { CTxOut(...), ... });   // the published outputs.hex, in order

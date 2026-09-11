@@ -1181,7 +1181,7 @@ UniValue getblockchaininfo(const JSONRPCRequest& request)
             "     }\n"
             "  },\n"
             "  \"genesis_migration\": {      (object) the one-shot allocation rule this node enforces\n"
-            "     \"armed\": xx,              (boolean) false on every network until a coordinated release arms it\n"
+            "     \"armed\": xx,              (boolean) true when this node carries the constants: compiled into a release, or set on regtest by -migrationheight and -migrationoutputs\n"
             "     \"height\": xx,             (numeric) the one height the rule applies at (0 = inert)\n"
             "     \"hash_migration_outputs\": \"xxxx\",  (string) the committed output vector hash (all zero = inert)\n"
             "     \"total_sats\": xx          (numeric) the committed total in sats\n"
@@ -1240,9 +1240,10 @@ UniValue getblockchaininfo(const JSONRPCRequest& request)
     obj.pushKV("softforks", softforks);
     obj.pushKV("bip9_softforks", bip9_softforks);
     // Genesis-migration allocation rule (DL-GENESIS-MIGRATION-IMPLEMENTATION §A1).
-    // Arming it is a hard fork, so operators need to see which constants a node
-    // enforces BEFORE the activation height. Read through the tier that validates
-    // the armed height, which is the struct ConnectBlock consults (bead ldbr).
+    // A node whose constants differ from the network's rejects the armed block, so
+    // operators need to see which constants a node enforces before it reaches that
+    // height. Read through the tier that validates the armed height, which is the
+    // struct ConnectBlock consults (bead ldbr).
     {
         const int nMigrationHeight = consensusParams.nMigrationHeight;
         const Consensus::Params& armedTier = Params().GetConsensus(nMigrationHeight > 0 ? nMigrationHeight : 0);

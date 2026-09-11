@@ -1253,8 +1253,9 @@ bool AppInitParameterInteraction()
                   (int)nMigrationHeight, nMigrationTotal, (unsigned)vOutputs.size(), hashOutputs.ToString());
     }
     // On every network, say at startup which genesis-migration constants this
-    // binary enforces. Arming is a hard fork, so the line is what an operator
-    // greps for before the activation height (bead ldbr; also getblockchaininfo).
+    // binary enforces. A node whose constants differ from the network's rejects
+    // the armed block, so this line is what an operator checks before the node
+    // reaches that height (bead ldbr; also getblockchaininfo).
     {
         const int nArmedHeight = chainparams.GetConsensus(0).nMigrationHeight;
         const Consensus::Params& tier = chainparams.GetConsensus(nArmedHeight > 0 ? nArmedHeight : 0);
